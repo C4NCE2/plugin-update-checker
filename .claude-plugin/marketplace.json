@@ -1,6 +1,7 @@
 {
   "name": "plugin-update-checker",
   "owner": { "name": "yangzhuocheng" },
+  "description": "Marketplace for update-checker — session-start update reminders for all your Claude Code plugins.",
   "plugins": [
     {
       "name": "update-checker",
