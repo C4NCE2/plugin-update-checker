@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
+  comparePlugin,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -57,4 +58,50 @@ test('TTL_MS: 产品承诺锁定为 24h', () => {
 test('recentFailure: null state / 损坏时间戳 → false', () => {
   assert.equal(recentFailure(null, 'm', NOW), false);
   assert.equal(recentFailure({ lastFailure: { m: 'not-a-date' } }, 'm', NOW), false);
+});
+
+test('comparePlugin: 条目缺失 → skip', () => {
+  const r = comparePlugin({ version: '1.0.0', gitCommitSha: 'abc' }, null);
+  assert.equal(r.status, 'skip');
+});
+
+test('comparePlugin: 形态a url源 sha 相同 → current', () => {
+  const inst = { version: '5.1.0', gitCommitSha: 'f2cbfbefebbfef77321e4c9abc9e949826bea9d7' };
+  const entry = { name: 'superpowers', source: { source: 'url', url: 'https://x/y.git', sha: 'f2cbfbefebbfef77321e4c9abc9e949826bea9d7' } };
+  assert.equal(comparePlugin(inst, entry).status, 'current');
+});
+
+test('comparePlugin: 形态a url源 sha 不同 → update,to 为 12 位短 sha', () => {
+  const inst = { version: '5.1.0', gitCommitSha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+  const entry = { name: 'x', source: { source: 'url', sha: 'f2cbfbefebbfef77321e4c9abc9e949826bea9d7' } };
+  const r = comparePlugin(inst, entry);
+  assert.equal(r.status, 'update');
+  assert.equal(r.to, 'f2cbfbefebbf');
+  assert.equal(r.from, '5.1.0');
+});
+
+test('comparePlugin: 形态b version 相同 → current;不同 → update', () => {
+  const entry = { name: 'swift-lsp', version: '1.0.0', source: './plugins/swift-lsp' };
+  assert.equal(comparePlugin({ version: '1.0.0' }, entry).status, 'current');
+  const r = comparePlugin({ version: '0.9.0' }, entry);
+  assert.equal(r.status, 'update');
+  assert.equal(r.to, '1.0.0');
+});
+
+test('comparePlugin: 已装 version 是 sha 回退值、条目是 semver → update(多提醒一次,更新后自愈)', () => {
+  const entry = { name: 'p', version: '2.0.0', source: './plugins/p' };
+  const inst = { version: '8435428dfc0f', gitCommitSha: '8435428dfc0fd6e4fea1c8e505ef5022b1f0d403' };
+  assert.equal(comparePlugin(inst, entry).status, 'update');
+});
+
+test('comparePlugin: 形态c 仓库内置且无 version → repo-check 携带 subPath', () => {
+  const inst = { version: 'da20c92503b2', gitCommitSha: 'da20c92503b2e8ff1cf28ca81a0df4673debdbf7' };
+  const entry = { name: 'document-skills', source: './skills/document-skills' };
+  const r = comparePlugin(inst, entry);
+  assert.equal(r.status, 'repo-check');
+  assert.equal(r.subPath, './skills/document-skills');
+});
+
+test('comparePlugin: url 源但无 sha → skip', () => {
+  assert.equal(comparePlugin({ gitCommitSha: 'a' }, { name: 'x', source: { source: 'url', url: 'u' } }).status, 'skip');
 });
