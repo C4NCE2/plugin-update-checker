@@ -275,15 +275,60 @@ git commit -m "feat: core module skeleton with throttled-refresh state helpers"
 
 ---
 
-### Task 3: comparePlugin 比对规则 1-3(TDD)
+### Task 3: comparePlugin 比对规则 1-3(TDD)+ Task 2 审查缺口回填
 
 **Files:**
 - Modify: `plugins/update-checker/scripts/check-updates.mjs`(文件末尾追加)
-- Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import 行)
+- Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import 区)
+
+- [ ] **Step 0(前置):回填 Task 2 质量审查发现的测试缺口**
+
+把测试文件开头的 import 区(原 `import { test } ...` 与 `import assert ...` 两行及模块 import 语句)整体替换为:
+
+```js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  needsRefresh, recentFailure, readJsonSafe, TTL_MS,
+} from '../scripts/check-updates.mjs';
+```
+
+测试文件末尾追加(这些测试针对已存在的实现,立即通过,属覆盖率回填而非 TDD 违例):
+
+```js
+test('readJsonSafe: 损坏 JSON → null;有效 JSON → 对象', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uc-json-'));
+  const broken = join(dir, 'broken.json');
+  const valid = join(dir, 'valid.json');
+  writeFileSync(broken, '{"broken":');
+  writeFileSync(valid, '{"a":1}');
+  assert.equal(readJsonSafe(broken), null);
+  assert.deepEqual(readJsonSafe(valid), { a: 1 });
+});
+
+test('TTL_MS: 产品承诺锁定为 24h', () => {
+  assert.equal(TTL_MS, 24 * 60 * 60 * 1000);
+});
+
+test('recentFailure: null state / 损坏时间戳 → false', () => {
+  assert.equal(recentFailure(null, 'm', NOW), false);
+  assert.equal(recentFailure({ lastFailure: { m: 'not-a-date' } }, 'm', NOW), false);
+});
+```
+
+运行 `node --test plugins/update-checker/tests/check-updates.test.mjs`,预期 `pass 9`,`fail 0`。提交:
+
+```bash
+git add plugins/update-checker/tests/check-updates.test.mjs
+git commit -m "test: backfill readJsonSafe corrupt-JSON, TTL lock, recentFailure null-state coverage"
+```
 
 - [ ] **Step 1: 追加失败的测试**
 
-把测试文件开头的 import 语句块整体替换为:
+把测试文件开头 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(其余 node 内置 import 保留不动):
 
 ```js
 import {
@@ -388,7 +433,7 @@ export function comparePlugin(installed, entry) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 13`,`fail 0`。
+预期:`pass 16`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -407,7 +452,7 @@ git commit -m "feat: plugin comparison rules a/b/c (sha, version, repo-check mar
 
 - [ ] **Step 1: 追加失败的测试**
 
-import 语句块替换为:
+把 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(其余 node 内置 import 保留不动):
 
 ```js
 import {
@@ -507,7 +552,7 @@ export function buildOutput(updates, stale = []) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 16`,`fail 0`。
+预期:`pass 19`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -664,7 +709,7 @@ export function repoPluginChanged(repoDir, sha, subPath) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 18`,`fail 0`。
+预期:`pass 21`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -931,7 +976,7 @@ process.exit(0);
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 20`,`fail 0`。
+预期:`pass 23`,`fail 0`。
 
 - [ ] **Step 6: 冒烟 — 直接以 hook 方式在真实环境跑一次入口**
 
