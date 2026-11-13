@@ -1,0 +1,6 @@
+{
+  "name": "update-checker",
+  "version": "0.1.0",
+  "description": "Session-start update reminders for all installed Claude Code plugins.",
+  "author": { "name": "yangzhuocheng" }
+}

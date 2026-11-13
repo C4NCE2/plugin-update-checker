@@ -1,0 +1,12 @@
+{
+  "name": "plugin-update-checker",
+  "owner": { "name": "yangzhuocheng" },
+  "plugins": [
+    {
+      "name": "update-checker",
+      "source": "./plugins/update-checker",
+      "description": "Reminds you about available updates for all installed Claude Code plugins at session start, across every marketplace you have registered.",
+      "category": "productivity"
+    }
+  ]
+}
