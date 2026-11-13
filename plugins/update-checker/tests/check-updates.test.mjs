@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
 } from '../scripts/check-updates.mjs';
@@ -35,4 +38,23 @@ test('recentFailure: 无记录 → false;30分钟前 → true;2小时前 → fal
 
 test('readJsonSafe: 文件不存在 → null', () => {
   assert.equal(readJsonSafe('Z:/definitely/missing-update-checker.json'), null);
+});
+
+test('readJsonSafe: 损坏 JSON → null;有效 JSON → 对象', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uc-json-'));
+  const broken = join(dir, 'broken.json');
+  const valid = join(dir, 'valid.json');
+  writeFileSync(broken, '{"broken":');
+  writeFileSync(valid, '{"a":1}');
+  assert.equal(readJsonSafe(broken), null);
+  assert.deepEqual(readJsonSafe(valid), { a: 1 });
+});
+
+test('TTL_MS: 产品承诺锁定为 24h', () => {
+  assert.equal(TTL_MS, 24 * 60 * 60 * 1000);
+});
+
+test('recentFailure: null state / 损坏时间戳 → false', () => {
+  assert.equal(recentFailure(null, 'm', NOW), false);
+  assert.equal(recentFailure({ lastFailure: { m: 'not-a-date' } }, 'm', NOW), false);
 });
