@@ -89,7 +89,7 @@ plugin). A missing or malformed file is ignored silently.
 ## Development
 
 - Design spec: `docs/superpowers/specs/2026-11-13-plugin-update-checker-design.md`
-- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (39 tests)
+- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (48 tests)
 - Debug: set `UPDATE_CHECKER_DEBUG=1`, logs go to
   `~/.claude/plugins/data/update-checker/debug.log`
 - **Release discipline: bump `plugins/update-checker/.claude-plugin/plugin.json`
