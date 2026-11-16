@@ -54,10 +54,10 @@ export function comparePlugin(installed, entry) {
   return { status: 'skip', reason: 'undecidable' };
 }
 
-// 版本号显示:sha 形态(12-40 位 hex)截前 12 位,其余原样
+// 版本号显示:sha 形态(12-64 位 hex)截前 12 位,其余原样
 export function shortVer(v) {
-  if (typeof v !== 'string') return '?';
-  return /^[0-9a-f]{12,40}$/i.test(v) ? v.slice(0, 12) : v;
+  if (typeof v !== 'string' || !v) return '?';
+  return /^[0-9a-f]{12,64}$/i.test(v) ? v.slice(0, 12) : v;
 }
 
 // "name@marketplace" → [name, marketplace];无 @ 时 marketplace 为空串

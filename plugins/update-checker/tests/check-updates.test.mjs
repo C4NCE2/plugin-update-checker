@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
-  comparePlugin, shortVer, buildOutput,
+  comparePlugin, shortVer, splitKey, buildOutput,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -123,11 +123,13 @@ test('comparePlugin: 条目 sha 为空串 → skip(不误报 update)', () => {
   assert.equal(r.reason, 'url-no-sha');
 });
 
-test('shortVer: semver 原样;长 sha 截 12 位;12 位 sha 原样;非字符串 → ?', () => {
+test('shortVer: semver 原样;长 sha 截 12 位;12 位 sha 原样;非字符串/空串 → ?', () => {
   assert.equal(shortVer('5.1.0'), '5.1.0');
   assert.equal(shortVer('f2cbfbefebbfef77321e4c9abc9e949826bea9d7'), 'f2cbfbefebbf');
   assert.equal(shortVer('da20c92503b2'), 'da20c92503b2');
   assert.equal(shortVer(undefined), '?');
+  assert.equal(shortVer(''), '?');
+  assert.equal(shortVer('ab'.repeat(32)), 'abababababab');
 });
 
 test('buildOutput: 空数组 → null', () => {
@@ -151,4 +153,10 @@ test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
   assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
   assert.match(out.hookSpecificOutput.additionalContext, /superpowers@claude-plugins-official/);
   assert.match(out.hookSpecificOutput.additionalContext, /claude plugin update/);
+});
+
+test('splitKey: 常规 key 拆分;无 @ / @ 开头 → marketplace 为空串', () => {
+  assert.deepEqual(splitKey('superpowers@claude-plugins-official'), ['superpowers', 'claude-plugins-official']);
+  assert.deepEqual(splitKey('noat'), ['noat', '']);
+  assert.deepEqual(splitKey('@x'), ['@x', '']);
 });
