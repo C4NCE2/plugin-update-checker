@@ -65,10 +65,16 @@ Claude 在第一条回复开头转达。每 24h 至多刷新一次 marketplace �
 
 - Claude Code with plugin support; Node.js ≥ 18 on PATH; git on PATH.
 
+## Language
+
+Reminder text follows your OS locale (Chinese on zh-* systems, English elsewhere).
+Force a language with `UPDATE_CHECKER_LANG=zh` or `UPDATE_CHECKER_LANG=en` in the
+environment Claude Code runs in (e.g. the `env` block of `~/.claude/settings.json`).
+
 ## Development
 
 - Design spec: `docs/superpowers/specs/2026-11-13-plugin-update-checker-design.md`
-- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (37 tests)
+- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (39 tests)
 - Debug: set `UPDATE_CHECKER_DEBUG=1`, logs go to
   `~/.claude/plugins/data/update-checker/debug.log`
 - **Release discipline: bump `plugins/update-checker/.claude-plugin/plugin.json`

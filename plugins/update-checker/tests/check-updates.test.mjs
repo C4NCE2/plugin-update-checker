@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
-  comparePlugin, shortVer, splitKey, buildOutput,
+  comparePlugin, shortVer, splitKey, buildOutput, resolveLang,
   repoPluginChanged, refreshMarketplace,
   run, isCaughtUp, targetDate, installedVersion,
 } from '../scripts/check-updates.mjs';
@@ -30,12 +30,16 @@ function makeRepo() {
 
 function withConfigDir(cfg, fn) {
   const prev = process.env.CLAUDE_CONFIG_DIR;
+  const prevLang = process.env.UPDATE_CHECKER_LANG;
   process.env.CLAUDE_CONFIG_DIR = cfg;
+  process.env.UPDATE_CHECKER_LANG = 'zh';
   try {
     return fn();
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = prev;
+    if (prevLang === undefined) delete process.env.UPDATE_CHECKER_LANG;
+    else process.env.UPDATE_CHECKER_LANG = prevLang;
   }
 }
 
@@ -172,6 +176,7 @@ test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
       { plugin: 'andrej-karpathy-skills@karpathy-skills', from: '1.0.0', to: '1.1.0' },
     ],
     [['karpathy-skills', 3]],
+    'zh',
   );
   assert.match(out.systemMessage, /2 个 Claude Code 插件有更新/);
   assert.match(out.systemMessage, /superpowers 5\.1\.0 → f2cbfbefebbf \(claude-plugins-official\)/);
@@ -601,4 +606,30 @@ test('run(): 记录 version 陈旧但安装目录 plugin.json 已最新 → 静�
   withConfigDir(cfg, () => {
     assert.equal(run(), null);
   });
+});
+
+test('resolveLang: env 覆盖 zh/en;非法覆盖回退 locale;zh* → zh;其余 → en', () => {
+  assert.equal(resolveLang({ UPDATE_CHECKER_LANG: 'en' }, 'zh-CN'), 'en');
+  assert.equal(resolveLang({ UPDATE_CHECKER_LANG: 'zh' }, 'en-US'), 'zh');
+  assert.equal(resolveLang({ UPDATE_CHECKER_LANG: 'fr' }, 'zh-CN'), 'zh');
+  assert.equal(resolveLang({}, 'zh-Hans-CN'), 'zh');
+  assert.equal(resolveLang({}, 'en-US'), 'en');
+  assert.equal(resolveLang({}, undefined), 'en');
+});
+
+test('buildOutput: 英文文案(单复数/命令标签/重启行/stale 附注/转达指令)', () => {
+  const one = buildOutput([{ plugin: 'demo@mkt', from: '1.0.0', to: '1.1.0' }], [], 'en');
+  assert.match(one.systemMessage, /🔄 1 Claude Code plugin update available:/);
+  assert.match(one.systemMessage, /Update commands:/);
+  assert.match(one.systemMessage, /Restart the session or run \/reload-plugins after updating\./);
+  const two = buildOutput(
+    [{ plugin: 'a@m', from: '1', to: '2' }, { plugin: 'b@m', from: '1', to: '2' }],
+    [['m', 1]],
+    'en',
+  );
+  assert.match(two.systemMessage, /🔄 2 Claude Code plugin updates available:/);
+  assert.match(two.systemMessage, /\(note: m version info is 1 day old and may be inaccurate\)/);
+  assert.match(two.hookSpecificOutput.additionalContext, /Relay the following reminder to the user verbatim/);
+  assert.match(two.hookSpecificOutput.additionalContext, /When the user asks to update, run the claude plugin update commands above one by one\./);
+  assert.equal(two.hookSpecificOutput.hookEventName, 'SessionStart');
 });

@@ -81,29 +81,46 @@ export function splitKey(key) {
   return at > 0 ? [key.slice(0, at), key.slice(at + 1)] : [key, ''];
 }
 
+// 语言解析:UPDATE_CHECKER_LANG=zh|en 优先;否则跟随操作系统 locale(zh* → 中文,其余 → 英文)
+// locale 用 rest 区分"省略"(读 OS locale)与"显式 undefined"(视为缺失 → en):
+// 默认参数会把显式 undefined 也吞成 OS locale,在 zh 系统上破坏缺失回退语义
+export function resolveLang(env = process.env, ...localeArg) {
+  const locale = localeArg.length > 0 ? localeArg[0] : Intl.DateTimeFormat().resolvedOptions().locale;
+  const override = env.UPDATE_CHECKER_LANG;
+  if (override === 'zh' || override === 'en') return override;
+  return /^zh\b/i.test(locale || '') ? 'zh' : 'en';
+}
+
 // updates: [{ plugin, from, to }](from/to 已经过 shortVer)
 // stale: [[marketplaceName, days]]  刷新失败且缓存过期的附注
-export function buildOutput(updates, stale = []) {
+// lang: 'zh' | 'en'(默认 resolveLang());正文与转达指令整体本地化
+export function buildOutput(updates, stale = [], lang = resolveLang()) {
   if (!Array.isArray(updates) || updates.length === 0) return null;
   const lines = updates.map((u) => {
     const [pname, mname] = splitKey(u.plugin);
     return `  • ${pname} ${u.from} → ${u.to} (${mname})`;
   });
   const cmds = updates.map((u) => `  claude plugin update ${u.plugin}`);
+  const zh = lang === 'zh';
   let body =
-    `🔄 ${updates.length} 个 Claude Code 插件有更新:\n` +
+    (zh ? `🔄 ${updates.length} 个 Claude Code 插件有更新:\n`
+        : `🔄 ${updates.length} Claude Code plugin ${updates.length === 1 ? 'update' : 'updates'} available:\n`) +
     lines.join('\n') + '\n' +
-    '更新命令:\n' + cmds.join('\n') + '\n' +
-    '更新后重启会话或运行 /reload-plugins 生效。';
+    (zh ? '更新命令:\n' : 'Update commands:\n') + cmds.join('\n') + '\n' +
+    (zh ? '更新后重启会话或运行 /reload-plugins 生效。'
+        : 'Restart the session or run /reload-plugins after updating.');
   for (const [name, days] of stale) {
-    body += `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`;
+    body += zh ? `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`
+               : `\n(note: ${name} version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)`;
   }
   // VSCode 面板不渲染 systemMessage(2.1.325 实证),additionalContext 承担跨环境可见性:
   // 指示模型在首条回复开头原样转达提醒,再照常回应;用户要求更新时逐条执行命令。
   const additionalContext =
-    '[update-checker] 插件更新提醒。请在本次回复的开头先向用户转达以下提醒(原样列出插件与命令,不要省略),然后照常回应用户:\n' +
+    (zh ? '[update-checker] 插件更新提醒。请在本次回复的开头先向用户转达以下提醒(原样列出插件与命令,不要省略),然后照常回应用户:\n'
+        : '[update-checker] Plugin update reminder. Relay the following reminder to the user verbatim at the beginning of this reply (list plugins and commands exactly, do not omit), then respond as usual:\n') +
     body + '\n' +
-    '用户要求更新时,逐条执行上述 claude plugin update 命令。';
+    (zh ? '用户要求更新时,逐条执行上述 claude plugin update 命令。'
+        : 'When the user asks to update, run the claude plugin update commands above one by one.');
   return {
     systemMessage: body,
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
@@ -191,7 +208,7 @@ export function debug(cfg, ...args) {
 }
 
 // 主编排:发现 → 节流刷新 → 比对 → 输出。失败一律静默降级,返回 null 表示无需提醒。
-export function run(now = Date.now()) {
+export function run(now = Date.now(), lang = resolveLang()) {
   const cfg = configDir();
   const pluginsDir = join(cfg, 'plugins');
   const installed = readJsonSafe(join(pluginsDir, 'installed_plugins.json'));
@@ -291,5 +308,5 @@ export function run(now = Date.now()) {
   } catch { debug(cfg, 'state write failed'); }
 
   debug(cfg, 'updates found:', String(updates.length));
-  return buildOutput(updates, stale);
+  return buildOutput(updates, stale, lang);
 }
