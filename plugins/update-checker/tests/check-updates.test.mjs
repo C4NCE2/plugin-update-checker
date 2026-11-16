@@ -1,14 +1,30 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput,
+  repoPluginChanged, refreshMarketplace,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
+
+function git(repo, ...args) {
+  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+}
+
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'uc-test-'));
+  git(dir, 'init');
+  git(dir, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  git(dir, 'config', 'user.email', 'test@example.com');
+  git(dir, 'config', 'user.name', 'test');
+  git(dir, 'config', 'commit.gpgsign', 'false');
+  return dir;
+}
 
 test('needsRefresh: 无状态/无记录 → true', () => {
   assert.equal(needsRefresh(null, 'm', NOW), true);
@@ -159,4 +175,49 @@ test('splitKey: 常规 key 拆分;无 @ / @ 开头 → marketplace 为空串', (
   assert.deepEqual(splitKey('superpowers@claude-plugins-official'), ['superpowers', 'claude-plugins-official']);
   assert.deepEqual(splitKey('noat'), ['noat', '']);
   assert.deepEqual(splitKey('@x'), ['@x', '']);
+});
+
+test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 sha → null', () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, 'plugins', 'foo'), { recursive: true });
+  mkdirSync(join(repo, 'other'), { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '1');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c1');
+  const sha = git(repo, 'rev-parse', 'HEAD').trim();
+
+  // 只改插件目录之外的文件 → 该插件无变化
+  writeFileSync(join(repo, 'other', 'b.txt'), '2');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c2');
+  assert.equal(repoPluginChanged(repo, sha, 'plugins/foo'), false);
+
+  // 改插件目录内文件 → 有变化
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '99');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c3');
+  assert.equal(repoPluginChanged(repo, sha, 'plugins/foo'), true);
+
+  // sha 不在历史中 / 为空 → 无法判定 null
+  assert.equal(repoPluginChanged(repo, 'deadbeef'.repeat(5), 'plugins/foo'), null);
+  assert.equal(repoPluginChanged(repo, '', 'plugins/foo'), null);
+});
+
+test('refreshMarketplace: 拉到 origin 新提交 → true;非 git 目录 → false', () => {
+  const origin = makeRepo();
+  writeFileSync(join(origin, 'f.txt'), '1');
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'c1');
+
+  const parent = mkdtempSync(join(tmpdir(), 'uc-parent-'));
+  const clone = join(parent, 'clone');
+  execFileSync('git', ['clone', origin, clone], { stdio: 'ignore' });
+
+  writeFileSync(join(origin, 'f.txt'), '2');
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'c2');
+
+  assert.equal(refreshMarketplace(clone), true);
+  assert.equal(readFileSync(join(clone, 'f.txt'), 'utf8'), '2');
+  assert.equal(refreshMarketplace(join(clone, 'definitely-missing')), false);
 });

@@ -1,6 +1,7 @@
 // check-updates.mjs — plugin-update-checker 核心逻辑。
 // 纯模块:导出函数,不主动执行;hook 入口见 hook-entry.mjs。
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 
 export const TTL_MS = 24 * 60 * 60 * 1000;     // marketplace 刷新节流间隔(24h)
 export const FAILURE_RETRY_MS = 60 * 60 * 1000; // 刷新失败后的重试间隔(1h)
@@ -91,4 +92,31 @@ export function buildOutput(updates, stale = []) {
     systemMessage,
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
   };
+}
+
+export const PULL_TIMEOUT_MS = 8 * 1000; // 单仓库 git pull 超时
+
+// 对 marketplace 缓存仓库做 git pull --ff-only;任何失败(离线、非快进、非仓库)→ false
+export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
+  try {
+    execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'], { timeout: timeoutMs, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 规则4:仓库内置且条目无 version 时,看插件子目录自已装 sha 以来是否有变更
+// 返回 true(有变更)/ false(无变更)/ null(无法判定:sha 缺失或不在历史中)
+// 纯本地 git 操作,不产生网络流量
+export function repoPluginChanged(repoDir, sha, subPath) {
+  if (typeof sha !== 'string' || !sha) return null;
+  try {
+    execFileSync('git', ['-C', repoDir, 'diff', '--quiet', sha, 'HEAD', '--', subPath],
+      { timeout: PULL_TIMEOUT_MS, stdio: 'ignore' });
+    return false; // exit 0 = 无差异
+  } catch (err) {
+    if (err && err.status === 1) return true; // exit 1 = 有差异
+    return null;                              // exit 128 等 = 坏 sha / git 失败
+  }
 }
