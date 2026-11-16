@@ -179,8 +179,10 @@ test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
   assert.match(out.systemMessage, /\/reload-plugins/);
   assert.match(out.systemMessage, /karpathy-skills 版本信息已过期 3 天/);
   assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
-  assert.match(out.hookSpecificOutput.additionalContext, /superpowers@claude-plugins-official/);
-  assert.match(out.hookSpecificOutput.additionalContext, /claude plugin update/);
+  assert.match(out.hookSpecificOutput.additionalContext, /请在本次回复的开头先向用户转达/);
+  assert.match(out.hookSpecificOutput.additionalContext, /superpowers 5\.1\.0 → f2cbfbefebbf \(claude-plugins-official\)/);
+  assert.match(out.hookSpecificOutput.additionalContext, /claude plugin update superpowers@claude-plugins-official/);
+  assert.match(out.hookSpecificOutput.additionalContext, /用户要求更新时,逐条执行上述 claude plugin update 命令/);
 });
 
 test('splitKey: 常规 key 拆分;无 @ / @ 开头 → marketplace 为空串', () => {

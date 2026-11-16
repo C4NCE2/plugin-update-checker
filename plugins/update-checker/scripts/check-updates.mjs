@@ -83,20 +83,22 @@ export function buildOutput(updates, stale = []) {
     return `  • ${pname} ${u.from} → ${u.to} (${mname})`;
   });
   const cmds = updates.map((u) => `  claude plugin update ${u.plugin}`);
-  let systemMessage =
+  let body =
     `🔄 ${updates.length} 个 Claude Code 插件有更新:\n` +
     lines.join('\n') + '\n' +
     '更新命令:\n' + cmds.join('\n') + '\n' +
     '更新后重启会话或运行 /reload-plugins 生效。';
   for (const [name, days] of stale) {
-    systemMessage += `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`;
+    body += `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`;
   }
+  // VSCode 面板不渲染 systemMessage(2.1.325 实证),additionalContext 承担跨环境可见性:
+  // 指示模型在首条回复开头原样转达提醒,再照常回应;用户要求更新时逐条执行命令。
   const additionalContext =
-    `[update-checker] 有 ${updates.length} 个插件可更新:${updates.map((u) => u.plugin).join('、')}。` +
-    '用户要求更新时,逐条执行 claude plugin update <name@marketplace>,' +
-    '并提醒更新后需重启会话或运行 /reload-plugins。';
+    '[update-checker] 插件更新提醒。请在本次回复的开头先向用户转达以下提醒(原样列出插件与命令,不要省略),然后照常回应用户:\n' +
+    body + '\n' +
+    '用户要求更新时,逐条执行上述 claude plugin update 命令。';
   return {
-    systemMessage,
+    systemMessage: body,
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
   };
 }
