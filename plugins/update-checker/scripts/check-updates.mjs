@@ -96,10 +96,20 @@ export function buildOutput(updates, stale = []) {
 
 export const PULL_TIMEOUT_MS = 8 * 1000; // 单仓库 git pull 超时
 
+// 强制非交互的 git 环境:禁止凭据/ssh 交互提示(含 Windows GCM GUI 弹窗),
+// 避免会话启动时弹窗或挂起。必须展开 process.env,否则 Windows 下 git 缺 PATH 会 spawn 失败。
+const GIT_NONINTERACTIVE_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: '0',
+  GCM_INTERACTIVE: 'never',
+  GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
+};
+
 // 对 marketplace 缓存仓库做 git pull --ff-only;任何失败(离线、非快进、非仓库)→ false
 export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
   try {
-    execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'], { timeout: timeoutMs, stdio: 'ignore' });
+    execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'],
+      { timeout: timeoutMs, stdio: 'ignore', env: GIT_NONINTERACTIVE_ENV });
     return true;
   } catch {
     return false;
@@ -107,13 +117,13 @@ export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
 }
 
 // 规则4:仓库内置且条目无 version 时,看插件子目录自已装 sha 以来是否有变更
-// 返回 true(有变更)/ false(无变更)/ null(无法判定:sha 缺失或不在历史中)
-// 纯本地 git 操作,不产生网络流量
-export function repoPluginChanged(repoDir, sha, subPath) {
-  if (typeof sha !== 'string' || !sha) return null;
+// 返回 true(有变更)/ false(无变更)/ null(无法判定:sha 缺失、非法或不在历史中)
+// 纯本地 git 操作,不产生网络流量;sha 先做 hex 预校验,杜绝被解析为 git 选项
+export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOUT_MS) {
+  if (typeof sha !== 'string' || !/^[0-9a-f]{4,64}$/i.test(sha)) return null;
   try {
     execFileSync('git', ['-C', repoDir, 'diff', '--quiet', sha, 'HEAD', '--', subPath],
-      { timeout: PULL_TIMEOUT_MS, stdio: 'ignore' });
+      { timeout: timeoutMs, stdio: 'ignore' });
     return false; // exit 0 = 无差异
   } catch (err) {
     if (err && err.status === 1) return true; // exit 1 = 有差异

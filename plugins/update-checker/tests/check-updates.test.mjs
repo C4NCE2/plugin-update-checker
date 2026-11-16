@@ -177,7 +177,7 @@ test('splitKey: 常规 key 拆分;无 @ / @ 开头 → marketplace 为空串', (
   assert.deepEqual(splitKey('@x'), ['@x', '']);
 });
 
-test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 sha → null', () => {
+test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 sha/非 hex sha → null', () => {
   const repo = makeRepo();
   mkdirSync(join(repo, 'plugins', 'foo'), { recursive: true });
   mkdirSync(join(repo, 'other'), { recursive: true });
@@ -186,11 +186,11 @@ test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 s
   git(repo, 'commit', '-m', 'c1');
   const sha = git(repo, 'rev-parse', 'HEAD').trim();
 
-  // 只改插件目录之外的文件 → 该插件无变化
+  // 只改插件目录之外的文件 → 该插件无变化(用生产真实的 ./ 前缀 pathspec 形态)
   writeFileSync(join(repo, 'other', 'b.txt'), '2');
   git(repo, 'add', '.');
   git(repo, 'commit', '-m', 'c2');
-  assert.equal(repoPluginChanged(repo, sha, 'plugins/foo'), false);
+  assert.equal(repoPluginChanged(repo, sha, './plugins/foo'), false);
 
   // 改插件目录内文件 → 有变化
   writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '99');
@@ -198,9 +198,10 @@ test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 s
   git(repo, 'commit', '-m', 'c3');
   assert.equal(repoPluginChanged(repo, sha, 'plugins/foo'), true);
 
-  // sha 不在历史中 / 为空 → 无法判定 null
+  // sha 不在历史中 / 为空 / 非 hex(选项注入形态)→ 无法判定 null
   assert.equal(repoPluginChanged(repo, 'deadbeef'.repeat(5), 'plugins/foo'), null);
   assert.equal(repoPluginChanged(repo, '', 'plugins/foo'), null);
+  assert.equal(repoPluginChanged(repo, '--output=x', 'plugins/foo'), null);
 });
 
 test('refreshMarketplace: 拉到 origin 新提交 → true;非 git 目录 → false', () => {
