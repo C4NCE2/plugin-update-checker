@@ -225,14 +225,16 @@ SessionStart 触发 → `node check-updates.mjs`:
 | 全部最新 → 静默 | ✅ stdout 空、exit 0 |
 | 离线降级(karpathy remote 置为不可达) | ✅ 401ms、exit 0、无 stderr、lastFailure 正确记录、恢复后正常 |
 | 自举自提醒 | ✅ 安装副本落后仓库 HEAD 时报"内容有更新" |
-| VSCode 面板 systemMessage 渲染 | ❌ 不渲染(2.1.325 源码实证 + 用户新会话截图:模型 thinking 收到 additionalContext 但 UI 无可见提醒)→ 风险 #1 坐实,改为模型转达设计(§8),待复验 |
-| 会话内"帮我更新插件" | ⏳ 待用户肉眼验证(演示用 karpathy 0.9.0 伪造态,备份在 %TEMP%\uc-karpathy-backup.json) |
+| VSCode 面板提醒可见性 | ✅ systemMessage 本身不渲染(2.1.325 源码实证);改模型转达设计(§8)后用户新会话实证:首条回复原样转达提醒再照常回应(2026-11-16 16:13 截图);CLI 终端仍原生渲染 systemMessage |
+| 会话内"帮我更新插件" | ✅ 用户实证:Claude 依 additionalContext 执行更新命令;伪造态 diverge 致 CLI 判已最新 no-op,暴露健壮性缺口 → 5ff50b2 修复(已装版本以安装目录 manifest 为准) |
+| 更新后静默 | ✅ 无头实证:重装 + 恢复演示残留后 stdout 空、exit 0;⏳ 待用户最终新会话复验 |
 
 **dogfood 发现与处置:**
 1. Claude Code 对 url 源插件更新后不回写 gitCommitSha(2.1.152/2.1.325 一致),已最新时重跑 update 因 EBUSY(Windows 临时目录锁,Claude Code 自身 bug)失败且不重写记录 → 第一版指纹抑制方案弃用,改为更新新近性判定(§6 v2),真机实证误报消除。
 2. `claude plugin update` 是版本驱动:内容变化但 plugin.json version 未变时报"already latest"不重取。**发布纪律:每次发布必须 bump plugin.json version**(写入 README 开发指引)。dogfood 期以 uninstall+install 刷新安装副本。
 3. 本地目录形态 marketplace 无 git remote → 刷新必然失败(预期;GitHub 发布后为正常克隆形态,不受影响)。
 4. git `%cI` 秒级精度与毫秒级 lastUpdated 存在同秒歧义 → 测试用显式日期规避(无 sleep);生产时间线分钟级传播,不受影响。
+5. installed_plugins.json 记录字段与安装目录实际文件可 diverge(伪造态实证:update 命令比对文件判已最新 no-op、不重写记录,读记录会永久误报且命令无法自愈)→ 已装版本以安装目录 `.claude-plugin/plugin.json` 为准、读不到回退记录(5ff50b2),diverge 自愈;演示残留已从 %TEMP%\uc-karpathy-backup.json 恢复。
 
 ## 13. 风险清单
 
