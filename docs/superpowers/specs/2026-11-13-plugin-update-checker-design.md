@@ -133,8 +133,8 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 ## 7. 时间与失败预算
 
-- 全脚本总预算 **10 秒**:超时立即停止后续 git pull,只用已有缓存完成比对输出。
-- 单仓库 `git pull` 超时 8s。
+- 全脚本总预算 **10 秒**:超时立即停止后续 git pull;比对阶段的规则 4 本地 git diff 同样受预算约束,剩余预算不足 500ms 时跳过该项判定(视为无法判定),只用已有缓存完成比对输出。
+- 单仓库 `git pull` 超时 8s;所有 git 子进程一律强制非交互(`GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`GIT_SSH_COMMAND="ssh -oBatchMode=yes"`),杜绝会话启动时的凭据弹窗或挂起。
 - 本地比对路径(无刷新需要时)目标 < 100ms。
 - **任何内部错误都不得冒泡**:hook 永远 exit 0;不向 stderr 输出(避免会话启动 UI 出现错误噪音)。
 - 调试:`UPDATE_CHECKER_DEBUG=1` 时把运行日志追加写入 state 目录下 `debug.log`。

@@ -836,12 +836,95 @@ git commit -m "feat: git integration - throttled pull and per-plugin diff detect
 
 ---
 
-### Task 6: run() 编排 + hook 入口 + 端到端集成测试(TDD)
+### Task 6: run() 编排 + hook 入口 + 端到端集成测试(TDD)+ Task 5 审查收尾
 
 **Files:**
-- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + 顶部 import 扩充)
+- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + 顶部 import 扩充 + git 函数加固)
 - Create: `plugins/update-checker/scripts/hook-entry.mjs`
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import)
+
+- [ ] **Step 0(前置):Task 5 质量审查收尾(非交互 git env + sha 预校验 + diff 超时参数)**
+
+TDD 顺序:先改测试看红灯,再修实现。
+
+1. 测试文件:把 repoPluginChanged 集成测试整体替换为(钉住生产 `./` 前缀形态 + 非 hex sha 预校验断言):
+
+```js
+test('repoPluginChanged: 子目录未动 → false;动过 → true;坏 sha/空 sha/非 hex sha → null', () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, 'plugins', 'foo'), { recursive: true });
+  mkdirSync(join(repo, 'other'), { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '1');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c1');
+  const sha = git(repo, 'rev-parse', 'HEAD').trim();
+
+  // 只改插件目录之外的文件 → 该插件无变化(用生产真实的 ./ 前缀 pathspec 形态)
+  writeFileSync(join(repo, 'other', 'b.txt'), '2');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c2');
+  assert.equal(repoPluginChanged(repo, sha, './plugins/foo'), false);
+
+  // 改插件目录内文件 → 有变化
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '99');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c3');
+  assert.equal(repoPluginChanged(repo, sha, 'plugins/foo'), true);
+
+  // sha 不在历史中 / 为空 / 非 hex(选项注入形态)→ 无法判定 null
+  assert.equal(repoPluginChanged(repo, 'deadbeef'.repeat(5), 'plugins/foo'), null);
+  assert.equal(repoPluginChanged(repo, '', 'plugins/foo'), null);
+  assert.equal(repoPluginChanged(repo, '--output=x', 'plugins/foo'), null);
+});
+```
+
+2. 运行 `node --test plugins/update-checker/tests/check-updates.test.mjs`,预期 `pass 23, fail 1`——唯一失败是 repoPluginChanged 用例:`--output=x` 会被当前实现传给 git 当选项解析,返回 false 而非 null。此即红灯。
+
+3. 修实现:`check-updates.mjs` 中把 refreshMarketplace 与 repoPluginChanged 两个函数(连同各自注释)整体替换为(PULL_TIMEOUT_MS 常量保持不动):
+
+```js
+// 强制非交互的 git 环境:禁止凭据/ssh 交互提示(含 Windows GCM GUI 弹窗),
+// 避免会话启动时弹窗或挂起。必须展开 process.env,否则 Windows 下 git 缺 PATH 会 spawn 失败。
+const GIT_NONINTERACTIVE_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: '0',
+  GCM_INTERACTIVE: 'never',
+  GIT_SSH_COMMAND: 'ssh -oBatchMode=yes',
+};
+
+// 对 marketplace 缓存仓库做 git pull --ff-only;任何失败(离线、非快进、非仓库)→ false
+export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
+  try {
+    execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'],
+      { timeout: timeoutMs, stdio: 'ignore', env: GIT_NONINTERACTIVE_ENV });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 规则4:仓库内置且条目无 version 时,看插件子目录自已装 sha 以来是否有变更
+// 返回 true(有变更)/ false(无变更)/ null(无法判定:sha 缺失、非法或不在历史中)
+// 纯本地 git 操作,不产生网络流量;sha 先做 hex 预校验,杜绝被解析为 git 选项
+export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOUT_MS) {
+  if (typeof sha !== 'string' || !/^[0-9a-f]{4,64}$/i.test(sha)) return null;
+  try {
+    execFileSync('git', ['-C', repoDir, 'diff', '--quiet', sha, 'HEAD', '--', subPath],
+      { timeout: timeoutMs, stdio: 'ignore' });
+    return false; // exit 0 = 无差异
+  } catch (err) {
+    if (err && err.status === 1) return true; // exit 1 = 有差异
+    return null;                              // exit 128 等 = 坏 sha / git 失败
+  }
+}
+```
+
+4. 重跑测试,预期 `pass 24`,`fail 0`。提交:
+
+```bash
+git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
+git commit -m "fix: non-interactive git env, sha pre-validation, diff timeout param; test: production pathspec form"
+```
 
 - [ ] **Step 1: 追加失败的端到端测试**
 
@@ -1044,8 +1127,11 @@ export function run(now = Date.now()) {
     if (!rec || !mkt) continue;
     let cmp = comparePlugin(rec, mkt.byName.get(pname) ?? null);
     if (cmp.status === 'repo-check') {
-      // 规则4:纯本地 git diff 判定插件子目录是否有变更
-      const changed = repoPluginChanged(mkt.dir, rec.gitCommitSha, cmp.subPath);
+      // 规则4:本地 git diff 判定插件子目录是否有变更;同样受总预算约束,预算不足视为无法判定
+      const remaining = budgetEnd - Date.now();
+      const changed = remaining > 500
+        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, cmp.subPath, Math.min(PULL_TIMEOUT_MS, remaining))
+        : null;
       cmp = changed === true
         ? { status: 'update', from: rec.version, to: '内容有更新' }
         : changed === false
