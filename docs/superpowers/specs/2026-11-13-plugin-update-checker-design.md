@@ -131,6 +131,8 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 提醒中展示:插件名、已装版本(截断 sha 显示前 12 位)、marketplace 名、更新命令。目标版本的显示规则:形态 b 显示新版本号;形态 a/c 显示新 sha 前 12 位或"内容有更新"。
 
+**"已更新"抑制(dogfood 实证修复,2026-11-16)**:Claude Code 的 `plugin update` 可能不回写 `gitCommitSha`(2.1.152 实测:superpowers 5.1.0→7.0.2 后 sha 仍为旧值,且新版缓存目录不再含 .git),导致 sha 系形态(a/c)在正当更新后**永久误报**。对策:state.json 记录提醒指纹 `reminded[key] = { fp, version, lastUpdated }`(形态 a 的 fp 为条目 sha;形态 c 的 fp 为 marketplace 仓库 HEAD sha;形态 b 靠 version 比较天然自愈,不参与抑制)。判定为有更新时:若 fp 与上次提醒相同、但已装记录的 version/lastUpdated 自上次提醒后发生变化 → 视为用户已执行更新,跳过本次提醒(nag 语义保留:记录未变则继续提醒);fp 变化 → 重新提醒。判定为 current 时清除该 key 的指纹。
+
 ## 7. 时间与失败预算
 
 - 全脚本总预算 **10 秒**:超时立即停止后续 git pull;比对阶段的规则 4 本地 git diff 同样受预算约束,剩余预算不足 500ms 时跳过该项判定(视为无法判定),只用已有缓存完成比对输出。
@@ -162,9 +164,18 @@ SessionStart 触发 → `node check-updates.mjs`:
 ```json
 {
   "lastRefresh": { "claude-plugins-official": "2026-11-13T08:00:00.000Z" },
-  "lastFailure": { "karpathy-skills": "2026-11-13T08:00:05.000Z" }
+  "lastFailure": { "karpathy-skills": "2026-11-13T08:00:05.000Z" },
+  "reminded": {
+    "superpowers@claude-plugins-official": {
+      "fp": "22f0b463e7a5...(条目 sha 或 marketplace HEAD sha)",
+      "version": "5.1.0",
+      "lastUpdated": "2026-06-24T09:17:06.080Z"
+    }
+  }
 }
 ```
+
+健壮性:state 顶层与三个嵌套字段均做"非 plain object 即视为空对象"守卫(损坏的标量/数组不得引发属性赋值 TypeError);state 损坏时降级并在下次运行自愈重写。
 
 ## 10. 关键技术决策与理由
 
