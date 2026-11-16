@@ -8,7 +8,7 @@ import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput,
   repoPluginChanged, refreshMarketplace,
-  run,
+  run, isCaughtUp, targetDate,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -313,7 +313,7 @@ test('run(): 损坏 state.json(标量)与非字符串 installLocation → 不抛
   withConfigDir(cfg, () => {
     assert.equal(run(), null); // 不抛 TypeError;无可比对 marketplace → 静默
     const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
-    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {}, reminded: {} });
+    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {} });
   });
 });
 
@@ -420,11 +420,14 @@ test('run(): sha 系误报自愈 — 更新后已装记录变化而 marketplace 
     writeInstalled('7.0.2', new Date().toISOString());
     assert.equal(run(), null);
 
-    // 3) marketplace sha 再变 → 重新提醒(保留 reminded,仅重置刷新节流以触发 pull)
+    // 3) marketplace sha 再变 → 重新提醒。
+    // 真实时间线:用户上次更新早于新 pin 出现,故把 lastUpdated 回拨到新 pin 之前;
+    // 重置刷新节流以触发 pull。显式日期避免 git 秒级提交时间与毫秒级 lastUpdated 的同秒歧义。
     manifest.plugins[0].source.sha = 'c'.repeat(40);
     writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
     git(origin, 'add', '.');
     git(origin, 'commit', '-m', 'm2');
+    writeInstalled('7.0.2', '2020-01-01T00:00:00.000Z');
     const statePath = join(pluginsDir, 'data', 'update-checker', 'state.json');
     const st = JSON.parse(readFileSync(statePath, 'utf8'));
     st.lastRefresh = {};
@@ -435,7 +438,7 @@ test('run(): sha 系误报自愈 — 更新后已装记录变化而 marketplace 
   });
 });
 
-test('run(): state 嵌套字段损坏(lastRefresh 标量/reminded 字符串)→ 不抛错,降级并自愈重写', () => {
+test('run(): state 嵌套字段损坏(lastRefresh 标量/lastFailure 数组)→ 不抛错,降级并自愈重写', () => {
   const cfg = mkdtempSync(join(tmpdir(), 'uc-nested-'));
   const pluginsDir = join(cfg, 'plugins');
   mkdirSync(join(pluginsDir, 'data', 'update-checker'), { recursive: true });
@@ -444,11 +447,112 @@ test('run(): state 嵌套字段损坏(lastRefresh 标量/reminded 字符串)→ 
     plugins: { 'demo@test-mkt': [{ scope: 'user', version: '1.0.0', gitCommitSha: 'z'.repeat(40) }] },
   }));
   writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({}));
-  writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), '{"lastRefresh":5,"reminded":"x"}');
+  writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), '{"lastRefresh":5,"lastFailure":[]}');
 
   withConfigDir(cfg, () => {
     assert.equal(run(), null);
     const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
-    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {}, reminded: {} });
+    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {} });
+  });
+});
+
+test('isCaughtUp: 晚于 → true;早于/相等 → false;无效 → false', () => {
+  assert.equal(isCaughtUp('2026-11-16T06:38:30Z', '2026-11-12T18:05:32Z'), true);
+  assert.equal(isCaughtUp('2026-11-12T18:05:32Z', '2026-11-16T06:38:30Z'), false);
+  assert.equal(isCaughtUp('2026-11-12T18:05:32Z', '2026-11-12T18:05:32Z'), false);
+  assert.equal(isCaughtUp(undefined, '2026-11-12T18:05:32Z'), false);
+  assert.equal(isCaughtUp('2026-11-16T06:38:30Z', null), false);
+  assert.equal(isCaughtUp('bad', 'bad'), false);
+});
+
+test('targetDate: pickaxe 找 sha 引入日期;子目录最后变更日期;找不到/非仓库 → null', () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(repo, 'plugins', 'foo'), { recursive: true });
+  writeFileSync(join(repo, '.claude-plugin', 'marketplace.json'), JSON.stringify({ plugins: [{ name: 'x', source: { source: 'url', sha: 'e'.repeat(40) } }] }));
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '1');
+  git(repo, 'add', '.');
+  git(repo, 'commit', '-m', 'c1');
+  const d1 = targetDate(repo, [`-S${'e'.repeat(40)}`, '--', '.claude-plugin/marketplace.json']);
+  assert.ok(d1 && !Number.isNaN(Date.parse(d1)));
+  const d2 = targetDate(repo, ['--', 'plugins/foo']);
+  assert.ok(d2 && !Number.isNaN(Date.parse(d2)));
+  assert.equal(targetDate(repo, [`-S${'f'.repeat(40)}`, '--', '.claude-plugin/marketplace.json']), null);
+  assert.equal(targetDate(join(repo, 'nope'), ['--', 'plugins/foo']), null);
+});
+
+test('run(): 部署前已更新(形态a)— lastUpdated 晚于 pin 引入日期 → 首跑即不误报', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = {
+    name: 'test-mkt-pre',
+    plugins: [{ name: 'urlp', source: { source: 'url', url: 'https://example.com/x.git', sha: 'a'.repeat(40) } }],
+  };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-pre-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt-pre');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    // 更新发生在"产品首次运行之前":sha 陈旧,lastUpdated 晚于 pin 提交时间
+    plugins: { 'urlp@test-mkt-pre': [{ scope: 'user', version: '7.0.2', gitCommitSha: 'b'.repeat(40), lastUpdated: new Date(Date.now() + 3600 * 1000).toISOString() }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt-pre': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+
+  withConfigDir(cfg, () => {
+    assert.equal(run(), null);
+  });
+});
+
+test('run(): 形态c 已跟上 — 子目录有变更但 lastUpdated 晚于其最后变更时间 → 静默;早于 → 提醒', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(origin, 'plugins', 'demo'), { recursive: true });
+  writeFileSync(join(origin, 'plugins', 'demo', 'a.txt'), '1');
+  const manifest = { name: 'test-mkt-cr', plugins: [{ name: 'demo', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const sha1 = git(origin, 'rev-parse', 'HEAD').trim();
+
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-cr-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt-cr');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  const installedPath = join(pluginsDir, 'installed_plugins.json');
+  const writeInstalled = (lastUpdated) => writeFileSync(installedPath, JSON.stringify({
+    version: 2,
+    plugins: { 'demo@test-mkt-cr': [{ scope: 'user', version: sha1.slice(0, 12), gitCommitSha: sha1, lastUpdated }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt-cr': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+
+  writeFileSync(join(origin, 'plugins', 'demo', 'a.txt'), '2');
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm2');
+
+  withConfigDir(cfg, () => {
+    // lastUpdated 早于子目录变更 → 提醒
+    writeInstalled('2020-01-01T00:00:00.000Z');
+    const out = run();
+    assert.ok(out);
+    assert.match(out.systemMessage, /demo .*→ 内容有更新 \(test-mkt-cr\)/);
+
+    // 模拟更新完成(sha 未回写),lastUpdated 晚于变更时间 → 静默
+    writeInstalled(new Date(Date.now() + 3600 * 1000).toISOString());
+    const statePath = join(pluginsDir, 'data', 'update-checker', 'state.json');
+    const st = JSON.parse(readFileSync(statePath, 'utf8'));
+    st.lastRefresh = {};
+    writeFileSync(statePath, JSON.stringify(st));
+    assert.equal(run(), null);
   });
 });

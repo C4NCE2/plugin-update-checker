@@ -138,14 +138,25 @@ export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOU
   }
 }
 
-// 读取 marketplace 仓库 HEAD sha(形态 c 的提醒指纹);失败 → null
-export function repoHeadSha(repoDir) {
+// 目标引入时间(纯本地 git 历史):
+// 形态 a 传 ['-S<sha>', '--', '.claude-plugin/marketplace.json'](pickaxe 查 pin 写入清单的提交日期)
+// 形态 c 传 ['--', subPath](插件子目录最后变更日期)
+// 查不到/失败 → null
+export function targetDate(repoDir, args, timeoutMs = PULL_TIMEOUT_MS) {
   try {
-    return execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'],
-      { timeout: PULL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+    const out = execFileSync('git', ['-C', repoDir, 'log', '-1', '--format=%cI', ...args],
+      { timeout: timeoutMs, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+    return out || null;
   } catch {
     return null;
   }
+}
+
+// 更新新近性:已装记录的更新时间晚于目标引入时间 → 已跟上;时间戳无效 → false(保守提醒)
+export function isCaughtUp(recLastUpdated, targetIso) {
+  const a = Date.parse(recLastUpdated ?? '');
+  const b = Date.parse(targetIso ?? '');
+  return !Number.isNaN(a) && !Number.isNaN(b) && a > b;
 }
 
 export const STALE_NOTE_MS = 48 * 60 * 60 * 1000; // 缓存超过 48h 未刷新成功 → 提醒附注
@@ -185,7 +196,6 @@ export function run(now = Date.now()) {
   const state = rawState && typeof rawState === 'object' ? rawState : {};
   state.lastRefresh = asObject(state.lastRefresh);
   state.lastFailure = asObject(state.lastFailure);
-  state.reminded = asObject(state.reminded);
 
   const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
   const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
@@ -231,36 +241,35 @@ export function run(now = Date.now()) {
     if (!rec || !mkt) continue;
     const entry = mkt.byName.get(pname) ?? null;
     let cmp = comparePlugin(rec, entry);
-    let fp = null; // 提醒指纹:仅 sha 系形态(a/c)需要"已更新"抑制
     if (cmp.status === 'repo-check') {
       // 规则4:本地 git diff 判定插件子目录是否有变更;同样受总预算约束,预算不足视为无法判定
+      const subPath = cmp.subPath;
       const remaining = budgetEnd - Date.now();
       const changed = remaining > 500
-        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, cmp.subPath, Math.min(PULL_TIMEOUT_MS, remaining))
+        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, subPath, Math.min(PULL_TIMEOUT_MS, remaining))
         : null;
       cmp = changed === true
         ? { status: 'update', from: rec.version, to: '内容有更新' }
         : changed === false
           ? { status: 'current' }
           : { status: 'skip', reason: 'undecidable' };
-      if (cmp.status === 'update') fp = repoHeadSha(mkt.dir);
+      if (cmp.status === 'update') {
+        // 形态 c"已跟上":更新时间晚于子目录最后变更时间(兼容不回写 sha 的 Claude 版本)
+        const rem = budgetEnd - Date.now();
+        const d = rem > 500 ? targetDate(mkt.dir, ['--', subPath], Math.min(PULL_TIMEOUT_MS, rem)) : null;
+        if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
+      }
     } else if (cmp.status === 'update' && entry && entry.source && typeof entry.source === 'object'
                && typeof entry.source.sha === 'string' && entry.source.sha) {
-      fp = entry.source.sha;
+      // 形态 a"已跟上":更新时间晚于 pin sha 写入清单的提交日期(兼容不回写 sha 的 Claude 版本)
+      const rem = budgetEnd - Date.now();
+      const d = rem > 500
+        ? targetDate(mkt.dir, [`-S${entry.source.sha}`, '--', '.claude-plugin/marketplace.json'], Math.min(PULL_TIMEOUT_MS, rem))
+        : null;
+      if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
     }
     if (cmp.status === 'update') {
-      // Claude Code 的 plugin update 可能不回写 gitCommitSha(dogfood 实证):
-      // marketplace 目标未变、但已装记录自上次提醒后变化 → 视为用户已更新,不再提醒;
-      // 目标再次变化 → 重新提醒。记录未变 → 保持 nag。
-      const prev = state.reminded[key];
-      if (fp && prev && prev.fp === fp
-          && (rec.version !== prev.version || rec.lastUpdated !== prev.lastUpdated)) {
-        continue;
-      }
-      if (fp) state.reminded[key] = { fp, version: rec.version, lastUpdated: rec.lastUpdated };
       updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to) });
-    } else if (cmp.status === 'current') {
-      delete state.reminded[key];
     }
   }
 
