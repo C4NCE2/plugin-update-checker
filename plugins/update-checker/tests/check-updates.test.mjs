@@ -822,3 +822,44 @@ test('hook-entry fixture: 全部最新 → 空 stdout、exit 0、空 stderr', ()
   assert.equal(r.stdout, '');
   assert.equal(r.stderr, '');
 });
+
+test('buildOutput: 来源溯源行(github/local/未知省略,zh/en)', () => {
+  const u = [
+    { plugin: 'a@m1', from: '1', to: '2', src: 'owner/repo1' },
+    { plugin: 'b@m2', from: '1', to: '2', src: 'local directory' },
+    { plugin: 'c@m3', from: '1', to: '2' },
+  ];
+  const zh = buildOutput(u, [], 'zh');
+  assert.match(zh.systemMessage, /来源: m1=owner\/repo1; m2=local directory/);
+  assert.ok(!zh.systemMessage.includes('m3='));
+  const en = buildOutput(u, [], 'en');
+  assert.match(en.systemMessage, /sources: m1=owner\/repo1; m2=local directory/);
+  const none = buildOutput([{ plugin: 'c@m3', from: '1', to: '2' }], [], 'zh');
+  assert.ok(!none.systemMessage.includes('来源'));
+});
+
+test('run(): 提醒带 marketplace 来源行(github repo)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'pv-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-pv-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'pv-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@pv-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'pv-mkt': { source: { source: 'github', repo: 'owner/pv-repo' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  withConfigDir(cfg, () => {
+    const out = run();
+    assert.ok(out);
+    assert.match(out.systemMessage, /来源: pv-mkt=owner\/pv-repo/);
+  });
+});

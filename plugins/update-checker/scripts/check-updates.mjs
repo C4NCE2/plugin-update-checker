@@ -97,7 +97,7 @@ export function resolveLang(env = process.env, ...localeArg) {
   return /^zh\b/i.test(locale || '') ? 'zh' : 'en';
 }
 
-// updates: [{ plugin, from, to }](from/to 已经过 shortVer)
+// updates: [{ plugin, from, to, src? }](from/to 已经过 shortVer;src 为 marketplace 来源,可省略)
 // stale: [[marketplaceName, days, failed]]  缓存过期的附注;failed=true 点名刷新失败
 // lang: 'zh' | 'en'(默认 resolveLang());正文与转达指令整体本地化
 export function buildOutput(updates, stale = [], lang = resolveLang()) {
@@ -108,10 +108,15 @@ export function buildOutput(updates, stale = [], lang = resolveLang()) {
   });
   const cmds = updates.map((u) => `  claude plugin update ${u.plugin}`);
   const zh = lang === 'zh';
+  const srcPairs = [...new Map(updates.filter((u) => u.src).map((u) => [splitKey(u.plugin)[1], u.src])).entries()];
+  const srcLine = srcPairs.length
+    ? (zh ? '  来源: ' : '  sources: ') + srcPairs.map(([m, s]) => `${m}=${s}`).join('; ') + '\n'
+    : '';
   let body =
     (zh ? `🔄 ${updates.length} 个 Claude Code 插件有更新:\n`
         : `🔄 ${updates.length} Claude Code plugin ${updates.length === 1 ? 'update' : 'updates'} available:\n`) +
     lines.join('\n') + '\n' +
+    srcLine +
     (zh ? '更新命令:\n' : 'Update commands:\n') + cmds.join('\n') + '\n' +
     (zh ? '更新后重启会话或运行 /reload-plugins 生效。'
         : 'Restart the session or run /reload-plugins after updating.');
@@ -311,7 +316,10 @@ export function run(now = Date.now(), lang = resolveLang()) {
       if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
     }
     if (cmp.status === 'update') {
-      updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to) });
+      const msrc = known[mname]?.source;
+      const src = msrc?.source === 'github' && typeof msrc.repo === 'string' ? msrc.repo
+        : msrc?.source === 'directory' ? 'local directory' : undefined;
+      updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to), src });
     }
   }
 
