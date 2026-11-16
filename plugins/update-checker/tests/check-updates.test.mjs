@@ -8,6 +8,7 @@ import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput,
   repoPluginChanged, refreshMarketplace,
+  run,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -24,6 +25,17 @@ function makeRepo() {
   git(dir, 'config', 'user.name', 'test');
   git(dir, 'config', 'commit.gpgsign', 'false');
   return dir;
+}
+
+function withConfigDir(cfg, fn) {
+  const prev = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = cfg;
+  try {
+    return fn();
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prev;
+  }
 }
 
 test('needsRefresh: 无状态/无记录 → true', () => {
@@ -221,4 +233,66 @@ test('refreshMarketplace: 拉到 origin 新提交 → true;非 git 目录 → fa
   assert.equal(refreshMarketplace(clone), true);
   assert.equal(readFileSync(join(clone, 'f.txt'), 'utf8'), '2');
   assert.equal(refreshMarketplace(join(clone, 'definitely-missing')), false);
+});
+
+test('run(): 全链路 — 刷新 marketplace、发现更新、输出 hook JSON、写 state', () => {
+  // 1. 造一个 origin marketplace 仓库,demo 插件当前版本 1.0.0
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(origin, 'plugins', 'demo'), { recursive: true });
+  const manifest = {
+    name: 'test-mkt',
+    plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }],
+  };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+
+  // 2. 造假配置目录:clone 作为 marketplace 缓存,已装版本 0.9.0(过期)
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-cfg-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@test-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'x'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt': {
+      source: { source: 'github', repo: 'a/b' },
+      installLocation: mktDir,
+      lastUpdated: new Date().toISOString(),
+    },
+  }));
+
+  // 3. origin 上把 demo 升到 1.1.0 → run() 应先 pull 再发现更新
+  manifest.plugins[0].version = '1.1.0';
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm2');
+
+  withConfigDir(cfg, () => {
+    const out = run();
+    assert.ok(out, '应产生提醒输出');
+    assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
+    assert.match(out.systemMessage, /demo 0\.9\.0 → 1\.1\.0 \(test-mkt\)/);
+    assert.match(out.systemMessage, /claude plugin update demo@test-mkt/);
+
+    // state.json 已写入且记录了刷新时间
+    const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
+    assert.ok(state.lastRefresh['test-mkt']);
+
+    // 4. 已装版本追上后 → 静默(null)
+    writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+      version: 2,
+      plugins: { 'demo@test-mkt': [{ scope: 'user', version: '1.1.0', gitCommitSha: 'y'.repeat(40) }] },
+    }));
+    assert.equal(run(), null);
+  });
+});
+
+test('run(): 状态文件缺失 → 静默 null', () => {
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-empty-'));
+  withConfigDir(cfg, () => assert.equal(run(), null));
 });

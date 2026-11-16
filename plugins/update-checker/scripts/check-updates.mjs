@@ -1,6 +1,8 @@
 // check-updates.mjs — plugin-update-checker 核心逻辑。
 // 纯模块:导出函数,不主动执行;hook 入口见 hook-entry.mjs。
-import { readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 export const TTL_MS = 24 * 60 * 60 * 1000;     // marketplace 刷新节流间隔(24h)
@@ -129,4 +131,109 @@ export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOU
     if (err && err.status === 1) return true; // exit 1 = 有差异
     return null;                              // exit 128 等 = 坏 sha / git 失败
   }
+}
+
+export const STALE_NOTE_MS = 48 * 60 * 60 * 1000; // 缓存超过 48h 未刷新成功 → 提醒附注
+export const TOTAL_BUDGET_MS = 10 * 1000;          // 全脚本时间预算
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function configDir() {
+  return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+export function stateDirFor(cfg) {
+  return join(cfg, 'plugins', 'data', 'update-checker');
+}
+
+// 仅 UPDATE_CHECKER_DEBUG=1 时写日志文件;绝不写 stderr
+export function debug(cfg, ...args) {
+  if (process.env.UPDATE_CHECKER_DEBUG !== '1') return;
+  try {
+    const dir = stateDirFor(cfg);
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'debug.log'), `${new Date().toISOString()} ${args.join(' ')}\n`);
+  } catch { /* 调试路径不冒泡任何错误 */ }
+}
+
+// 主编排:发现 → 节流刷新 → 比对 → 输出。失败一律静默降级,返回 null 表示无需提醒。
+export function run(now = Date.now()) {
+  const cfg = configDir();
+  const pluginsDir = join(cfg, 'plugins');
+  const installed = readJsonSafe(join(pluginsDir, 'installed_plugins.json'));
+  const known = readJsonSafe(join(pluginsDir, 'known_marketplaces.json'));
+  if (!installed?.plugins || !known) { debug(cfg, 'missing state files'); return null; }
+  const pluginEntries = Object.entries(installed.plugins);
+  if (pluginEntries.length === 0) return null;
+
+  const statePath = join(stateDirFor(cfg), 'state.json');
+  const state = readJsonSafe(statePath) || {};
+  state.lastRefresh = state.lastRefresh || {};
+  state.lastFailure = state.lastFailure || {};
+
+  const budgetEnd = now + TOTAL_BUDGET_MS;
+  const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
+  const stale = [];            // [marketplace 名, 过期天数]
+
+  for (const [name, mkt] of Object.entries(known)) {
+    const dir = mkt?.installLocation;
+    if (!dir || !existsSync(join(dir, '.git'))) { debug(cfg, 'skip non-git marketplace', name); continue; }
+
+    if (needsRefresh(state, name, now) && !recentFailure(state, name, now)) {
+      const remaining = budgetEnd - Date.now();
+      if (remaining > 500) {
+        debug(cfg, 'refreshing', name);
+        if (refreshMarketplace(dir, Math.min(PULL_TIMEOUT_MS, remaining))) {
+          state.lastRefresh[name] = new Date().toISOString();
+          delete state.lastFailure[name];
+        } else {
+          state.lastFailure[name] = new Date().toISOString();
+          debug(cfg, 'refresh failed', name);
+        }
+      }
+    }
+
+    const manifest = readJsonSafe(join(dir, '.claude-plugin', 'marketplace.json'));
+    if (!Array.isArray(manifest?.plugins)) { debug(cfg, 'no manifest', name); continue; }
+    manifests.set(name, {
+      dir,
+      byName: new Map(manifest.plugins.filter((p) => p && p.name).map((p) => [p.name, p])),
+    });
+
+    const lastT = Date.parse(state.lastRefresh[name] ?? mkt?.lastUpdated ?? '');
+    if (!Number.isNaN(lastT) && now - lastT > STALE_NOTE_MS) {
+      stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS))]);
+    }
+  }
+
+  const updates = [];
+  for (const [key, records] of pluginEntries) {
+    const rec = Array.isArray(records) ? records[0] : records; // 多 scope 取首条
+    const [pname, mname] = splitKey(key);
+    const mkt = manifests.get(mname);
+    if (!rec || !mkt) continue;
+    let cmp = comparePlugin(rec, mkt.byName.get(pname) ?? null);
+    if (cmp.status === 'repo-check') {
+      // 规则4:本地 git diff 判定插件子目录是否有变更;同样受总预算约束,预算不足视为无法判定
+      const remaining = budgetEnd - Date.now();
+      const changed = remaining > 500
+        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, cmp.subPath, Math.min(PULL_TIMEOUT_MS, remaining))
+        : null;
+      cmp = changed === true
+        ? { status: 'update', from: rec.version, to: '内容有更新' }
+        : changed === false
+          ? { status: 'current' }
+          : { status: 'skip', reason: 'undecidable' };
+    }
+    if (cmp.status === 'update') {
+      updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to) });
+    }
+  }
+
+  try {
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(state, null, 2));
+  } catch { debug(cfg, 'state write failed'); }
+
+  debug(cfg, 'updates found:', String(updates.length));
+  return buildOutput(updates, stale);
 }
