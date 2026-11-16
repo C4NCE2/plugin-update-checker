@@ -214,6 +214,26 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 **发布**:dogfood 全绿 → 推 GitHub 公开仓库 → README 安装两行命令。
 
+### 12.1 Dogfood 实测记录(2026-11-16,Windows 10 + VSCode 扩展 2.1.325 + 全局 CLI 2.1.152)
+
+| 场景 | 结果 |
+|---|---|
+| 官方 `claude plugin validate` | ✅ 通过 |
+| CLI 安装(marketplace add 本地目录 + install) | ✅ v0.1.0 enabled |
+| hook 接线(无头 `claude -p` + UPDATE_CHECKER_DEBUG=1) | ✅ SessionStart 触发、`${CLAUDE_PLUGIN_ROOT}` Windows 展开正确(风险 #2 解除)、debug.log 正常 |
+| 真实提醒 + 一键更新 | ✅ superpowers 5.1.0→7.0.2(落后 5 个月两个大版本);document-skills 更新且 sha 正确回写 |
+| 全部最新 → 静默 | ✅ stdout 空、exit 0 |
+| 离线降级(karpathy remote 置为不可达) | ✅ 401ms、exit 0、无 stderr、lastFailure 正确记录、恢复后正常 |
+| 自举自提醒 | ✅ 安装副本落后仓库 HEAD 时报"内容有更新" |
+| VSCode 面板 systemMessage 渲染 | ⏳ 待用户肉眼验证(风险 #1;演示用 karpathy 0.9.0 伪造态,备份在 %TEMP%\uc-karpathy-backup.json) |
+| 会话内"帮我更新插件" | ⏳ 待用户肉眼验证 |
+
+**dogfood 发现与处置:**
+1. Claude Code 对 url 源插件更新后不回写 gitCommitSha(2.1.152/2.1.325 一致),已最新时重跑 update 因 EBUSY(Windows 临时目录锁,Claude Code 自身 bug)失败且不重写记录 → 第一版指纹抑制方案弃用,改为更新新近性判定(§6 v2),真机实证误报消除。
+2. `claude plugin update` 是版本驱动:内容变化但 plugin.json version 未变时报"already latest"不重取。**发布纪律:每次发布必须 bump plugin.json version**(写入 README 开发指引)。dogfood 期以 uninstall+install 刷新安装副本。
+3. 本地目录形态 marketplace 无 git remote → 刷新必然失败(预期;GitHub 发布后为正常克隆形态,不受影响)。
+4. git `%cI` 秒级精度与毫秒级 lastUpdated 存在同秒歧义 → 测试用显式日期规避(无 sleep);生产时间线分钟级传播,不受影响。
+
 ## 13. 风险清单
 
 1. `systemMessage` 在 VSCode 面板的渲染效果未经实测(schema 支持已取证)→ dogfood 第一项验证。
