@@ -160,7 +160,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 }
 ```
 
-- `systemMessage` 面向用户;`additionalContext` 面向会话内 Claude,支撑"会话里说一句就帮我更新"的一键体验。
+- `systemMessage` 面向 CLI 终端用户;**VSCode 面板不渲染 systemMessage**(2.1.325 实证:webview 无渲染逻辑,extension.js 仅内部状态字段),故 `additionalContext` 承担跨环境可见性:以"转达指令 + 完整提醒正文"指示模型在首条回复开头原样转达提醒,然后照常回应用户;同时支撑"会话里说一句就帮我更新"的一键体验。
 - 若某 marketplace 刷新失败导致缓存过期 > 48h,systemMessage 末尾附注:`(注:<marketplace> 版本信息已过期 N 天,可能不准)`。
 - `claude plugin update` 需要重启生效(二进制取证:"restart required to apply";2.1.323 支持 `/reload-plugins`),文案必须带上这一点。
 
@@ -225,8 +225,8 @@ SessionStart 触发 → `node check-updates.mjs`:
 | 全部最新 → 静默 | ✅ stdout 空、exit 0 |
 | 离线降级(karpathy remote 置为不可达) | ✅ 401ms、exit 0、无 stderr、lastFailure 正确记录、恢复后正常 |
 | 自举自提醒 | ✅ 安装副本落后仓库 HEAD 时报"内容有更新" |
-| VSCode 面板 systemMessage 渲染 | ⏳ 待用户肉眼验证(风险 #1;演示用 karpathy 0.9.0 伪造态,备份在 %TEMP%\uc-karpathy-backup.json) |
-| 会话内"帮我更新插件" | ⏳ 待用户肉眼验证 |
+| VSCode 面板 systemMessage 渲染 | ❌ 不渲染(2.1.325 源码实证 + 用户新会话截图:模型 thinking 收到 additionalContext 但 UI 无可见提醒)→ 风险 #1 坐实,改为模型转达设计(§8),待复验 |
+| 会话内"帮我更新插件" | ⏳ 待用户肉眼验证(演示用 karpathy 0.9.0 伪造态,备份在 %TEMP%\uc-karpathy-backup.json) |
 
 **dogfood 发现与处置:**
 1. Claude Code 对 url 源插件更新后不回写 gitCommitSha(2.1.152/2.1.325 一致),已最新时重跑 update 因 EBUSY(Windows 临时目录锁,Claude Code 自身 bug)失败且不重写记录 → 第一版指纹抑制方案弃用,改为更新新近性判定(§6 v2),真机实证误报消除。
