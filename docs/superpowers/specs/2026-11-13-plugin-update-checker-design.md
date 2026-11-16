@@ -146,7 +146,7 @@ SessionStart 触发 → `node check-updates.mjs`:
   "systemMessage": "🔄 2 个 Claude Code 插件有更新:\n  • superpowers 5.1.0 → f2cbfbefebbf (claude-plugins-official)\n  • andrej-karpathy-skills 1.0.0 → 1.1.0 (karpathy-skills)\n更新命令:\n  claude plugin update superpowers@claude-plugins-official\n  claude plugin update andrej-karpathy-skills@karpathy-skills\n更新后重启会话或运行 /reload-plugins 生效。",
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "[update-checker] 有 2 个插件可更新:superpowers@claude-plugins-official、andrej-karpathy-skills@karpathy-skills。用户要求更新时,逐条执行 claude plugin update <name@marketplace>,并提醒更新后需重启会话或 /reload-plugins。"
+    "additionalContext": "[update-checker] 有 2 个插件可更新:superpowers@claude-plugins-official、andrej-karpathy-skills@karpathy-skills。用户要求更新时,逐条执行 claude plugin update <name@marketplace>,并提醒更新后需重启会话或运行 /reload-plugins。"
   }
 }
 ```

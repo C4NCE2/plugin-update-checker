@@ -626,11 +626,64 @@ git commit -m "feat: reminder output builder (systemMessage + additionalContext)
 
 ---
 
-### Task 5: git 集成函数 refreshMarketplace / repoPluginChanged(TDD,真实临时 git 仓库)
+### Task 5: git 集成函数 refreshMarketplace / repoPluginChanged(TDD,真实临时 git 仓库)+ Task 4 审查收尾
 
 **Files:**
-- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加)
+- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + shortVer 一处修改)
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加 helpers 与测试、替换 import)
+
+- [ ] **Step 0(前置):Task 4 质量审查收尾(shortVer 守护 + splitKey 单测)**
+
+1. 把测试文件 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(加入 splitKey):
+
+```js
+import {
+  needsRefresh, recentFailure, readJsonSafe, TTL_MS,
+  comparePlugin, shortVer, splitKey, buildOutput,
+} from '../scripts/check-updates.mjs';
+```
+
+2. 把现有 shortVer 测试整体替换为(新增空串与 64 位 hex 断言):
+
+```js
+test('shortVer: semver 原样;长 sha 截 12 位;12 位 sha 原样;非字符串/空串 → ?', () => {
+  assert.equal(shortVer('5.1.0'), '5.1.0');
+  assert.equal(shortVer('f2cbfbefebbfef77321e4c9abc9e949826bea9d7'), 'f2cbfbefebbf');
+  assert.equal(shortVer('da20c92503b2'), 'da20c92503b2');
+  assert.equal(shortVer(undefined), '?');
+  assert.equal(shortVer(''), '?');
+  assert.equal(shortVer('ab'.repeat(32)), 'abababababab');
+});
+```
+
+3. 测试文件末尾追加 splitKey 直接单测:
+
+```js
+test('splitKey: 常规 key 拆分;无 @ / @ 开头 → marketplace 为空串', () => {
+  assert.deepEqual(splitKey('superpowers@claude-plugins-official'), ['superpowers', 'claude-plugins-official']);
+  assert.deepEqual(splitKey('noat'), ['noat', '']);
+  assert.deepEqual(splitKey('@x'), ['@x', '']);
+});
+```
+
+4. 运行 `node --test plugins/update-checker/tests/check-updates.test.mjs`,预期 `pass 21, fail 1`——唯一失败是 shortVer 用例(空串当前返回 `''`、64 位 hex 当前不截断);splitKey 新测试应直接通过。此即本步 TDD 红灯。
+
+5. 修实现:`check-updates.mjs` 中 shortVer 函数整体替换为:
+
+```js
+// 版本号显示:sha 形态(12-64 位 hex)截前 12 位,其余原样
+export function shortVer(v) {
+  if (typeof v !== 'string' || !v) return '?';
+  return /^[0-9a-f]{12,64}$/i.test(v) ? v.slice(0, 12) : v;
+}
+```
+
+6. 重跑测试,预期 `pass 22`,`fail 0`。提交:
+
+```bash
+git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
+git commit -m "fix: shortVer empty-string guard and sha-256 length; test: splitKey coverage"
+```
 
 - [ ] **Step 1: 追加失败的测试**
 
@@ -645,7 +698,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
-  comparePlugin, shortVer, buildOutput,
+  comparePlugin, shortVer, splitKey, buildOutput,
   repoPluginChanged, refreshMarketplace,
 } from '../scripts/check-updates.mjs';
 ```
@@ -772,7 +825,7 @@ export function repoPluginChanged(repoDir, sha, subPath) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 23`,`fail 0`。
+预期:`pass 24`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -797,7 +850,7 @@ import 语句块中,从 `'../scripts/check-updates.mjs'` 的导入增加 `run`:
 ```js
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
-  comparePlugin, shortVer, buildOutput,
+  comparePlugin, shortVer, splitKey, buildOutput,
   repoPluginChanged, refreshMarketplace,
   run,
 } from '../scripts/check-updates.mjs';
@@ -1039,7 +1092,7 @@ process.exit(0);
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 25`,`fail 0`。
+预期:`pass 26`,`fail 0`。
 
 - [ ] **Step 6: 冒烟 — 直接以 hook 方式在真实环境跑一次入口**
 
