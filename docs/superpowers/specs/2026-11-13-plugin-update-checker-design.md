@@ -263,7 +263,9 @@ SessionStart 触发 → `node check-updates.mjs`:
 - **i18n 是被测试的契约**:zh/en 输出须有结构 parity 测试(行数/ bullet 行/命令行/键结构相同,仅标签文本不同),防改一语忘另一语(学自 Upkeep test/locale-parity.test.ts,缩放版)。
 - **版本双写须有 parity 测试**:marketplace 条目 version 与 plugin.json version 一致(目录站展示依赖条目 version)。
 
-## 12.3 CI 通道(v0.1.2,学自 Upkeep reusable workflow + issue upsert)
+## 12.3 CI 通道(v0.2 顺延;学自 Upkeep reusable workflow + issue upsert)
+
+**版本决策(2026-11-16,用户)**:CI/lock 通道整体顺延 v0.2——它本质是另一个工作(团队声明依赖新鲜度),与"个人被动 nag"是两种受众;lockfile 是新的公共契约,晚一个版本承诺。v0.1.2 只含其中的质量基建部分:自 dogfood cron + hook fixture 集成测试(不涉产品定位)。v0.1.2 故事句:"竞品源码学来的正确性与健壮性";v0.2 故事句:"团队通道"。
 
 团队级 nag:不依赖谁开 session,CI 定时检查**仓库声明的插件依赖**并 upsert tracking issue。
 
