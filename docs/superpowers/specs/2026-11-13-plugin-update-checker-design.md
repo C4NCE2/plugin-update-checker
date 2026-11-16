@@ -18,9 +18,9 @@ Claude Code CLI 内置了启动时的 "Plugin autoupdate" 后台流程,但在以
 **一句话**:装上它,你的 Claude Code 会在每次会话启动时替你盯着所有已装插件的更新,发现新版本就提醒,并给出可直接执行的更新命令。
 
 - 产品本身是一个 Claude Code 插件,通过产品自己的 GitHub 仓库(即一个 marketplace)分发。
-- 任意机器两条命令接入(`<owner>` 为发布时确定的 GitHub 用户名,默认 `yangzhuocheng`):
+- 任意机器两条命令接入(已发布于 GitHub 账号 `C4NCE2`,2026-11-16,v0.1.0):
   ```
-  /plugin marketplace add <owner>/plugin-update-checker
+  /plugin marketplace add C4NCE2/plugin-update-checker
   /plugin install update-checker@plugin-update-checker
   ```
 - 零配置:运行时读取该机器自己的 `~/.claude/plugins/` 状态文件,自动发现该机器装了哪些插件、注册了哪些 marketplace。
@@ -143,7 +143,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 ## 7. 时间与失败预算
 
 - 全脚本总预算 **10 秒**:超时立即停止后续 git pull;比对阶段的规则 4 本地 git diff 同样受预算约束,剩余预算不足 500ms 时跳过该项判定(视为无法判定),只用已有缓存完成比对输出。
-- 单仓库 `git pull` 超时 8s;所有 git 子进程一律强制非交互(`GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`GIT_SSH_COMMAND="ssh -oBatchMode=yes"`),杜绝会话启动时的凭据弹窗或挂起。
+- 单仓库 `git pull` 超时 8s;可能访问网络的 git 子进程(pull)一律强制非交互(`GIT_TERMINAL_PROMPT=0`、`GCM_INTERACTIVE=never`、`GIT_SSH_COMMAND="ssh -oBatchMode=yes"`),杜绝会话启动时的凭据弹窗或挂起;diff/log 为纯本地操作,不触发凭据提示,无需该 env。
 - 本地比对路径(无刷新需要时)目标 < 100ms。
 - **任何内部错误都不得冒泡**:hook 永远 exit 0;不向 stderr 输出(避免会话启动 UI 出现错误噪音)。
 - 调试:`UPDATE_CHECKER_DEBUG=1` 时把运行日志追加写入 state 目录下 `debug.log`。
@@ -155,7 +155,7 @@ SessionStart 触发 → `node check-updates.mjs`:
   "systemMessage": "🔄 2 个 Claude Code 插件有更新:\n  • superpowers 5.1.0 → f2cbfbefebbf (claude-plugins-official)\n  • andrej-karpathy-skills 1.0.0 → 1.1.0 (karpathy-skills)\n更新命令:\n  claude plugin update superpowers@claude-plugins-official\n  claude plugin update andrej-karpathy-skills@karpathy-skills\n更新后重启会话或运行 /reload-plugins 生效。",
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "[update-checker] 有 2 个插件可更新:superpowers@claude-plugins-official、andrej-karpathy-skills@karpathy-skills。用户要求更新时,逐条执行 claude plugin update <name@marketplace>,并提醒更新后需重启会话或运行 /reload-plugins。"
+    "additionalContext": "[update-checker] 插件更新提醒。请在本次回复的开头先向用户转达以下提醒(原样列出插件与命令,不要省略),然后照常回应用户:\n🔄 2 个 Claude Code 插件有更新:\n  • superpowers 5.1.0 → f2cbfbefebbf (claude-plugins-official)\n  • andrej-karpathy-skills 1.0.0 → 1.1.0 (karpathy-skills)\n更新命令:\n  claude plugin update superpowers@claude-plugins-official\n  claude plugin update andrej-karpathy-skills@karpathy-skills\n更新后重启会话或运行 /reload-plugins 生效。\n用户要求更新时,逐条执行上述 claude plugin update 命令。"
   }
 }
 ```
