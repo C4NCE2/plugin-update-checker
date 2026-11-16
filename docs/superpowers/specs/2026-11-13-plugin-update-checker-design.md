@@ -133,8 +133,9 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 **"已跟上"判定(dogfood 实证修复,2026-11-16,第二版)**:Claude Code 的 `plugin update` 对 url 源插件可能不回写 `gitCommitSha`(2.1.152/2.1.325 实测:superpowers 5.1.0→7.0.2 后 sha 仍为旧值,新缓存目录无 .git;已最新时重跑 update 在本机因 EBUSY 失败且不重写记录),导致 sha 系形态(a/c)在正当更新后误报。第一版"提醒指纹"方案对"产品部署前已完成的更新"无效(首条指纹即更新后状态),故弃用,改为**更新新近性判定**——纯本地 git 历史信号,不依赖 state、不依赖 update 命令行为:
 
-- 形态 a:用 pickaxe 查 pin sha 写入 marketplace 清单的提交日期 `D = git log -1 --format=%cI -S"<entry.sha>" -- .claude-plugin/marketplace.json`;若 `rec.lastUpdated > D` → 用户的更新发生在该 pin 成为目标之后,视为已跟上(current),否则提醒。
-- 形态 c:查插件子目录最后变更日期 `D = git log -1 --format=%cI -- <subPath>`;若 `rec.lastUpdated > D` → 已跟上,否则提醒。
+- 形态 a:用 pickaxe 查 pin sha 写入 marketplace 清单的提交日期 `D = git log -1 --format=%cI --diff-merges=first-parent -S"<entry.sha>" -- .claude-plugin/marketplace.json`;若 `rec.lastUpdated > D` → 用户的更新发生在该 pin 成为目标之后,视为已跟上(current),否则提醒。
+- 形态 c:查插件子目录最后变更日期 `D = git log -1 --format=%cI --diff-merges=first-parent -- <subPath>`;若 `rec.lastUpdated > D` → 已跟上,否则提醒。
+- **git flag 纪律(v0.1.2,学自 Upkeep src/gitmeta.ts)**:所有 `git log` 加 `--diff-merges=first-parent`(merge-only 变更不漏,否则新近性日期偏旧致误 nag);所有 git 调用加 `-c core.quotePath=false`(非 ASCII 路径不被转义,防中文插件名/路径失配)。`git diff A B` 为两树直接比较,不涉及 merge 遍历,无需 diff-merges。
 - 形态 b:version 比较天然自愈,不参与。
 - D 查不到/时间戳无效/预算不足 → 保守提醒(nag 语义保留:未更新则每次提醒)。
 
@@ -161,7 +162,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 ```
 
 - `systemMessage` 面向 CLI 终端用户;**VSCode 面板不渲染 systemMessage**(2.1.325 实证:webview 无渲染逻辑,extension.js 仅内部状态字段),故 `additionalContext` 承担跨环境可见性:以"转达指令 + 完整提醒正文"指示模型在首条回复开头原样转达提醒,然后照常回应用户;同时支撑"会话里说一句就帮我更新"的一键体验。
-- 若某 marketplace 刷新失败导致缓存过期 > 48h,systemMessage 末尾附注:`(注:<marketplace> 版本信息已过期 N 天,可能不准)`。
+- 若某 marketplace 缓存过期 > 48h,systemMessage 末尾附注:`(注:<marketplace> 版本信息已过期 N 天,可能不准)`;**若该 marketplace 存在 lastFailure 记录,附注点名失败**(v0.1.2,学自 Upkeep"点名失败"降级哲学):`(注:<marketplace> 刷新失败,版本信息已过期 N 天,可能不准)` / en `(note: <mkt> refresh failed; version info is N day(s) old and may be inaccurate)`。stale 三元组 `[name, days, failed]`。
 - `claude plugin update` 需要重启生效(二进制取证:"restart required to apply";2.1.323 支持 `/reload-plugins`),文案必须带上这一点。
 
 ### 8.1 语言解析(v0.1.1)
@@ -183,6 +184,18 @@ SessionStart 触发 → `node check-updates.mjs`:
 ```
 
 健壮性:state 顶层与两个嵌套字段均做"非 plain object 即视为空对象"守卫(损坏的标量/数组不得引发属性赋值 TypeError);state 损坏时降级并在下次运行自愈重写。历史版本遗留的 reminded 字段不再使用(读出后原样保留,无副作用)。
+
+### 9.1 忽略配置(v0.1.2,学自 Upkeep .claude/audit.yml 的最小配置面)
+
+路径:`<configDir>/update-checker.json`(机器级,零依赖 JSON.parse):
+
+```json
+{ "ignore": ["karpathy-skills", "some-plugin@some-marketplace"] }
+```
+
+- 元素匹配 marketplace 名 → 该 marketplace 整体跳过(不刷新不比对);匹配插件 key → 该插件跳过。
+- 缺失/损坏/ignore 非数组 → 视为空配置(静默降级,与 state 同哲学)。
+- 单层配置,无仓库级覆盖(我们不是仓库审计工具,不需要 Upkeep 的三层优先级)。
 
 ## 10. 关键技术决策与理由
 
@@ -242,6 +255,13 @@ SessionStart 触发 → `node check-updates.mjs`:
 3. 本地目录形态 marketplace 无 git remote → 刷新必然失败(预期;GitHub 发布后为正常克隆形态,不受影响)。
 4. git `%cI` 秒级精度与毫秒级 lastUpdated 存在同秒歧义 → 测试用显式日期规避(无 sleep);生产时间线分钟级传播,不受影响。
 5. installed_plugins.json 记录字段与安装目录实际文件可 diverge(伪造态实证:update 命令比对文件判已最新 no-op、不重写记录,读记录会永久误报且命令无法自愈)→ 已装版本以安装目录 `.claude-plugin/plugin.json` 为准、读不到回退记录(5ff50b2),diverge 自愈;演示残留已从 %TEMP%\uc-karpathy-backup.json 恢复。
+
+## 12.2 工程原则(v0.1.2 起,竞品源码分析结论)
+
+- **承诺靠机械验证,不靠自觉**:只读比对阶段须有回归测试断言"marketplace 工作树/HEAD 与安装目录零改动"(学自 Upkeep local-audit.sh 的 output-only 前后快照守卫)。
+- **未来任何 LLM-in-loop 功能**(代执行更新、on-demand skill)必须:工具白名单 + 写区 sandbox(--add-dir)+ turn 上限 + "输出产物是 turn 耗尽前必须完成的唯一一步"的 prompt 纪律 + 跑后状态校验(学自 Upkeep local-audit.sh / _reviewer-prompt.md)。检测路径保持零 LLM。
+- **i18n 是被测试的契约**:zh/en 输出须有结构 parity 测试(行数/ bullet 行/命令行/键结构相同,仅标签文本不同),防改一语忘另一语(学自 Upkeep test/locale-parity.test.ts,缩放版)。
+- **版本双写须有 parity 测试**:marketplace 条目 version 与 plugin.json version 一致(目录站展示依赖条目 version)。
 
 ## 13. 风险清单
 
