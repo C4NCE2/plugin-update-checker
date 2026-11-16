@@ -444,11 +444,74 @@ git commit -m "feat: plugin comparison rules a/b/c (sha, version, repo-check mar
 
 ---
 
-### Task 4: shortVer / splitKey / buildOutput 提醒输出(TDD)
+### Task 4: shortVer / splitKey / buildOutput 提醒输出(TDD)+ Task 3 审查收尾
 
 **Files:**
-- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加)
+- Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + comparePlugin 一处守护)
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import)
+
+- [ ] **Step 0(前置):Task 3 质量审查收尾(小修 + 测试锁定)**
+
+按 TDD 顺序:先改测试看到红灯,再修实现。
+
+1. 测试文件:把 `test('comparePlugin: 条目缺失 → skip', ...)` 整体替换为:
+
+```js
+test('comparePlugin: 条目缺失 → skip', () => {
+  const r = comparePlugin({ version: '1.0.0', gitCommitSha: 'abc' }, null);
+  assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'entry-missing');
+});
+```
+
+把 `test('comparePlugin: url 源但无 sha → skip', ...)` 整体替换为:
+
+```js
+test('comparePlugin: url 源但无 sha → skip', () => {
+  const r = comparePlugin({ gitCommitSha: 'a' }, { name: 'x', source: { source: 'url', url: 'u' } });
+  assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'url-no-sha');
+});
+```
+
+2. 测试文件末尾追加两个新测试:
+
+```js
+test('comparePlugin: entry.source 缺失/null → skip reason undecidable', () => {
+  assert.equal(comparePlugin({ version: '1.0' }, { name: 'x' }).reason, 'undecidable');
+  assert.equal(comparePlugin({ version: '1.0' }, { name: 'x', source: null }).reason, 'undecidable');
+});
+
+test('comparePlugin: 条目 sha 为空串 → skip(不误报 update)', () => {
+  const r = comparePlugin(
+    { version: '5.1.0', gitCommitSha: 'f2cbfbefebbfef77321e4c9abc9e949826bea9d7' },
+    { name: 'x', source: { source: 'url', sha: '' } },
+  );
+  assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'url-no-sha');
+});
+```
+
+3. 运行 `node --test plugins/update-checker/tests/check-updates.test.mjs`,预期:`pass 17, fail 1`——唯一失败是"条目 sha 为空串"用例(当前实现会误判 update),这就是本步 TDD 红灯。
+
+4. 修实现:`check-updates.mjs` 的 comparePlugin 中,把这一行:
+
+```js
+    if (typeof src.sha === 'string' && typeof installed.gitCommitSha === 'string' && installed.gitCommitSha) {
+```
+
+替换为:
+
+```js
+    if (typeof src.sha === 'string' && src.sha && typeof installed.gitCommitSha === 'string' && installed.gitCommitSha) {
+```
+
+5. 重跑测试,预期 `pass 18`,`fail 0`。提交:
+
+```bash
+git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
+git commit -m "fix: guard empty entry sha; test: lock skip reasons and undecidable branch"
+```
 
 - [ ] **Step 1: 追加失败的测试**
 
@@ -552,7 +615,7 @@ export function buildOutput(updates, stale = []) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 19`,`fail 0`。
+预期:`pass 21`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -709,7 +772,7 @@ export function repoPluginChanged(repoDir, sha, subPath) {
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 21`,`fail 0`。
+预期:`pass 23`,`fail 0`。
 
 - [ ] **Step 5: 提交**
 
@@ -976,7 +1039,7 @@ process.exit(0);
 node --test plugins/update-checker/tests/check-updates.test.mjs
 ```
 
-预期:`pass 23`,`fail 0`。
+预期:`pass 25`,`fail 0`。
 
 - [ ] **Step 6: 冒烟 — 直接以 hook 方式在真实环境跑一次入口**
 
