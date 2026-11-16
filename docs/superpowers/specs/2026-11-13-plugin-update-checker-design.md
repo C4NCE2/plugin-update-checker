@@ -35,7 +35,7 @@ Claude Code CLI 内置了启动时的 "Plugin autoupdate" 后台流程,但在以
 - 不检测"插件已从 marketplace 下架"(条目消失时跳过,留待未来)
 - 不做非 git 源的 marketplace(本地目录源等,跳过)
 - 不做任何 UI
-- 提醒文案 v1 仅中文(i18n 留待未来)
+- ~~提醒文案 v1 仅中文~~ → v0.1.1 已实现双语(zh/en),见 §8.1
 
 ## 4. 仓库结构
 
@@ -163,6 +163,13 @@ SessionStart 触发 → `node check-updates.mjs`:
 - `systemMessage` 面向 CLI 终端用户;**VSCode 面板不渲染 systemMessage**(2.1.325 实证:webview 无渲染逻辑,extension.js 仅内部状态字段),故 `additionalContext` 承担跨环境可见性:以"转达指令 + 完整提醒正文"指示模型在首条回复开头原样转达提醒,然后照常回应用户;同时支撑"会话里说一句就帮我更新"的一键体验。
 - 若某 marketplace 刷新失败导致缓存过期 > 48h,systemMessage 末尾附注:`(注:<marketplace> 版本信息已过期 N 天,可能不准)`。
 - `claude plugin update` 需要重启生效(二进制取证:"restart required to apply";2.1.323 支持 `/reload-plugins`),文案必须带上这一点。
+
+### 8.1 语言解析(v0.1.1)
+
+- `resolveLang(env, locale)`:环境变量 `UPDATE_CHECKER_LANG` 取值 `zh`/`en` 时优先;否则按操作系统 locale(`Intl.DateTimeFormat().resolvedOptions().locale`)以 `zh` 开头判中文,其余一律英文。非法覆盖值忽略。
+- `buildOutput(updates, stale, lang)` 与 `run(now, lang)` 接受语言参数(默认 resolveLang()),systemMessage 正文与 additionalContext 转达指令整体按 lang 本地化;插件名/版本/命令本身语言中立。
+- 英文文案要点:update(s) 单复数、"Update commands:"、"Restart the session or run /reload-plugins after updating."、stale 附注 "(note: <mkt> version info is N day(s) old and may be inaccurate)"、转达指令 "Relay the following reminder to the user verbatim at the beginning of this reply … then respond as usual"。
+- 测试约束:e2e 经 withConfigDir 固定 `UPDATE_CHECKER_LANG=zh`(保证 CI 任意 locale 下断言稳定);buildOutput 单测显式传 lang;CI 矩阵 Node 18/20/24。
 
 ## 9. 状态文件
 
