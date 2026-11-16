@@ -1,5 +1,7 @@
 # plugin-update-checker
 
+[![tests](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml/badge.svg)](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml)
+
 A Claude Code plugin that reminds you, at every session start, when any of your
 installed Claude Code plugins has an update available — across **all** your
 marketplaces, including third-party ones. Works in the CLI and in the VSCode
@@ -20,6 +22,12 @@ reminders, never silent auto-updates.
 /plugin install update-checker@plugin-update-checker
 ```
 
+Or from a terminal (no session needed):
+
+```bash
+claude plugin marketplace add C4NCE2/plugin-update-checker && claude plugin install update-checker@plugin-update-checker
+```
+
 ## What you get
 
 - A reminder at session start listing outdated plugins with the exact
@@ -33,6 +41,11 @@ reminders, never silent auto-updates.
 - False-positive resistant: understands Claude Code's stale `gitCommitSha`
   records and record/file divergence, so a plugin you already updated is not
   nagged about.
+
+What it looks like in the VSCode panel (Claude relays the reminder at the start
+of its first reply):
+
+![VSCode panel update reminder](docs/assets/vscode-relay-reminder.png)
 
 ## Privacy
 
