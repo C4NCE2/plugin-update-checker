@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
@@ -369,7 +370,7 @@ test('run(): 形态c(repo-check)— 插件子目录有变更 → "内容有更�
 
 test('hook-entry: 空配置目录下 exit 0、stdout/stderr 均为空', () => {
   const cfg = mkdtempSync(join(tmpdir(), 'uc-entry-'));
-  const entry = join(import.meta.dirname, '..', 'scripts', 'hook-entry.mjs');
+  const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'hook-entry.mjs');
   const r = spawnSync(process.execPath, [entry], {
     env: { ...process.env, CLAUDE_CONFIG_DIR: cfg },
     encoding: 'utf8',
