@@ -21,6 +21,13 @@ export function asObject(v) {
   return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 }
 
+// 已装插件的真实版本:读安装目录 .claude-plugin/plugin.json;缺失/非法 → null(回退记录字段)
+export function installedVersion(installPath) {
+  if (typeof installPath !== 'string' || !installPath) return null;
+  const m = readJsonSafe(join(installPath, '.claude-plugin', 'plugin.json'));
+  return m && typeof m.version === 'string' && m.version ? m.version : null;
+}
+
 // 距上次成功刷新 >= ttl 才需要刷新;无记录/坏记录视为需要
 export function needsRefresh(state, name, now, ttlMs = TTL_MS) {
   const t = Date.parse(state?.lastRefresh?.[name] ?? '');
@@ -237,10 +244,13 @@ export function run(now = Date.now()) {
 
   const updates = [];
   for (const [key, records] of pluginEntries) {
-    const rec = Array.isArray(records) ? records[0] : records; // 多 scope 取首条
+    const rec0 = Array.isArray(records) ? records[0] : records; // 多 scope 取首条
     const [pname, mname] = splitKey(key);
     const mkt = manifests.get(mname);
-    if (!rec || !mkt) continue;
+    if (!rec0 || !mkt) continue;
+    // 已装版本以安装目录 plugin.json 为准(记录字段可能与实际文件 diverge);读不到回退记录
+    const disk = installedVersion(rec0.installPath);
+    const rec = disk ? { ...rec0, version: disk } : rec0;
     const entry = mkt.byName.get(pname) ?? null;
     let cmp = comparePlugin(rec, entry);
     if (cmp.status === 'repo-check') {

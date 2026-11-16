@@ -8,7 +8,7 @@ import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput,
   repoPluginChanged, refreshMarketplace,
-  run, isCaughtUp, targetDate,
+  run, isCaughtUp, targetDate, installedVersion,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -555,6 +555,49 @@ test('run(): 形态c 已跟上 — 子目录有变更但 lastUpdated 晚于其�
     const st = JSON.parse(readFileSync(statePath, 'utf8'));
     st.lastRefresh = {};
     writeFileSync(statePath, JSON.stringify(st));
+    assert.equal(run(), null);
+  });
+});
+
+test('installedVersion: 读安装目录 plugin.json;缺失/无 version/非法路径 → null', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uc-iv-'));
+  assert.equal(installedVersion(dir), null);
+  mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'x', version: '2.3.4' }));
+  assert.equal(installedVersion(dir), '2.3.4');
+  writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'x' }));
+  assert.equal(installedVersion(dir), null);
+  assert.equal(installedVersion(undefined), null);
+  assert.equal(installedVersion(123), null);
+});
+
+test('run(): 记录 version 陈旧但安装目录 plugin.json 已最新 → 静默(diverge 自愈)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'test-mkt-dv', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-dv-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt-dv');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+
+  // 安装目录真实 plugin.json 是 1.0.0,记录字段却是 0.9.0(模拟 diverge)
+  const installPath = join(pluginsDir, 'cache', 'test-mkt-dv', 'demo', '1.0.0');
+  mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@test-mkt-dv': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40), installPath }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt-dv': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+
+  withConfigDir(cfg, () => {
     assert.equal(run(), null);
   });
 });
