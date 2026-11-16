@@ -92,7 +92,7 @@ export function resolveLang(env = process.env, ...localeArg) {
 }
 
 // updates: [{ plugin, from, to }](from/to 已经过 shortVer)
-// stale: [[marketplaceName, days]]  刷新失败且缓存过期的附注
+// stale: [[marketplaceName, days, failed]]  缓存过期的附注;failed=true 点名刷新失败
 // lang: 'zh' | 'en'(默认 resolveLang());正文与转达指令整体本地化
 export function buildOutput(updates, stale = [], lang = resolveLang()) {
   if (!Array.isArray(updates) || updates.length === 0) return null;
@@ -109,9 +109,10 @@ export function buildOutput(updates, stale = [], lang = resolveLang()) {
     (zh ? '更新命令:\n' : 'Update commands:\n') + cmds.join('\n') + '\n' +
     (zh ? '更新后重启会话或运行 /reload-plugins 生效。'
         : 'Restart the session or run /reload-plugins after updating.');
-  for (const [name, days] of stale) {
-    body += zh ? `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`
-               : `\n(note: ${name} version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)`;
+  for (const [name, days, failed] of stale) {
+    body += zh
+      ? (failed ? `\n(注:${name} 刷新失败,版本信息已过期 ${days} 天,可能不准)` : `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`)
+      : (failed ? `\n(note: ${name} refresh failed; version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)` : `\n(note: ${name} version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)`);
   }
   // VSCode 面板不渲染 systemMessage(2.1.325 实证),additionalContext 承担跨环境可见性:
   // 指示模型在首条回复开头原样转达提醒,再照常回应;用户要求更新时逐条执行命令。
@@ -141,7 +142,7 @@ const GIT_NONINTERACTIVE_ENV = {
 // 对 marketplace 缓存仓库做 git pull --ff-only;任何失败(离线、非快进、非仓库)→ false
 export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
   try {
-    execFileSync('git', ['-C', repoDir, 'pull', '--ff-only'],
+    execFileSync('git', ['-c', 'core.quotePath=false', '-C', repoDir, 'pull', '--ff-only'],
       { timeout: timeoutMs, stdio: 'ignore', env: GIT_NONINTERACTIVE_ENV });
     return true;
   } catch {
@@ -152,10 +153,11 @@ export function refreshMarketplace(repoDir, timeoutMs = PULL_TIMEOUT_MS) {
 // 规则4:仓库内置且条目无 version 时,看插件子目录自已装 sha 以来是否有变更
 // 返回 true(有变更)/ false(无变更)/ null(无法判定:sha 缺失、非法或不在历史中)
 // 纯本地 git 操作,不产生网络流量;sha 先做 hex 预校验,杜绝被解析为 git 选项
+// 两树直接比较,无需 diff-merges
 export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOUT_MS) {
   if (typeof sha !== 'string' || !/^[0-9a-f]{4,64}$/i.test(sha)) return null;
   try {
-    execFileSync('git', ['-C', repoDir, 'diff', '--quiet', sha, 'HEAD', '--', subPath],
+    execFileSync('git', ['-c', 'core.quotePath=false', '-C', repoDir, 'diff', '--quiet', sha, 'HEAD', '--', subPath],
       { timeout: timeoutMs, stdio: 'ignore' });
     return false; // exit 0 = 无差异
   } catch (err) {
@@ -167,10 +169,12 @@ export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOU
 // 目标引入时间(纯本地 git 历史):
 // 形态 a 传 ['-S<sha>', '--', '.claude-plugin/marketplace.json'](pickaxe 查 pin 写入清单的提交日期)
 // 形态 c 传 ['--', subPath](插件子目录最后变更日期)
+// --diff-merges=first-parent:merge-only 变更不漏(学自 Upkeep gitmeta)
+// 该 flag 隐式开启 patch 输出,须后置 --no-patch 抑制,stdout 才只剩 %cI 日期行
 // 查不到/失败 → null
 export function targetDate(repoDir, args, timeoutMs = PULL_TIMEOUT_MS) {
   try {
-    const out = execFileSync('git', ['-C', repoDir, 'log', '-1', '--format=%cI', ...args],
+    const out = execFileSync('git', ['-c', 'core.quotePath=false', '-C', repoDir, 'log', '-1', '--format=%cI', '--diff-merges=first-parent', '--no-patch', ...args],
       { timeout: timeoutMs, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
     return out || null;
   } catch {
@@ -225,7 +229,7 @@ export function run(now = Date.now(), lang = resolveLang()) {
 
   const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
   const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
-  const stale = [];            // [marketplace 名, 过期天数]
+  const stale = [];            // [marketplace 名, 过期天数, 是否刷新失败]
 
   for (const [name, mkt] of Object.entries(known)) {
     const dir = mkt?.installLocation;
@@ -255,7 +259,7 @@ export function run(now = Date.now(), lang = resolveLang()) {
     let lastT = Date.parse(state.lastRefresh[name] ?? '');
     if (Number.isNaN(lastT)) lastT = Date.parse(mkt?.lastUpdated ?? '');
     if (!Number.isNaN(lastT) && now - lastT > STALE_NOTE_MS) {
-      stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS))]);
+      stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS)), Boolean(state.lastFailure[name])]);
     }
   }
 

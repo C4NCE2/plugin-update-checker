@@ -175,7 +175,7 @@ test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
       { plugin: 'superpowers@claude-plugins-official', from: '5.1.0', to: 'f2cbfbefebbf' },
       { plugin: 'andrej-karpathy-skills@karpathy-skills', from: '1.0.0', to: '1.1.0' },
     ],
-    [['karpathy-skills', 3]],
+    [['karpathy-skills', 3, false]],
     'zh',
   );
   assert.match(out.systemMessage, /2 个 Claude Code 插件有更新/);
@@ -624,7 +624,7 @@ test('buildOutput: 英文文案(单复数/命令标签/重启行/stale 附注/�
   assert.match(one.systemMessage, /Restart the session or run \/reload-plugins after updating\./);
   const two = buildOutput(
     [{ plugin: 'a@m', from: '1', to: '2' }, { plugin: 'b@m', from: '1', to: '2' }],
-    [['m', 1]],
+    [['m', 1, false]],
     'en',
   );
   assert.match(two.systemMessage, /🔄 2 Claude Code plugin updates available:/);
@@ -632,4 +632,34 @@ test('buildOutput: 英文文案(单复数/命令标签/重启行/stale 附注/�
   assert.match(two.hookSpecificOutput.additionalContext, /Relay the following reminder to the user verbatim/);
   assert.match(two.hookSpecificOutput.additionalContext, /When the user asks to update, run the claude plugin update commands above one by one\./);
   assert.equal(two.hookSpecificOutput.hookEventName, 'SessionStart');
+});
+
+test('targetDate: merge-only 变更计入(--diff-merges=first-parent)', () => {
+  const repo = makeRepo();
+  const gitDate = (date, ...args) => execFileSync('git', ['-C', repo, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+  });
+  mkdirSync(join(repo, 'plugins', 'foo'), { recursive: true });
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '1');
+  gitDate('2026-01-01T00:00:00Z', 'add', '.');
+  gitDate('2026-01-01T00:00:00Z', 'commit', '-m', 'c1');
+  gitDate('2026-01-01T01:00:00Z', 'checkout', '-b', 'side');
+  writeFileSync(join(repo, 'plugins', 'foo', 'a.txt'), '2');
+  gitDate('2026-01-01T01:00:00Z', 'add', '.');
+  gitDate('2026-01-01T01:00:00Z', 'commit', '-m', 'c2');
+  gitDate('2026-01-02T00:00:00Z', 'checkout', 'main');
+  gitDate('2026-01-02T00:00:00Z', 'merge', '--no-ff', 'side', '-m', 'merge');
+  const mergeDate = Date.parse(gitDate('2026-01-02T00:00:00Z', 'log', '-1', '--format=%cI', 'HEAD').trim());
+  const d = targetDate(repo, ['--', 'plugins/foo']);
+  assert.ok(d);
+  assert.equal(Date.parse(d), mergeDate);
+});
+
+test('buildOutput: stale 附注点名刷新失败(zh/en)', () => {
+  const u = [{ plugin: 'a@m', from: '1', to: '2' }];
+  const zh = buildOutput(u, [['m', 5, true]], 'zh');
+  assert.match(zh.systemMessage, /注:m 刷新失败,版本信息已过期 5 天,可能不准/);
+  const en = buildOutput(u, [['m', 5, true]], 'en');
+  assert.match(en.systemMessage, /note: m refresh failed; version info is 5 days old and may be inaccurate/);
 });
