@@ -53,3 +53,42 @@ export function comparePlugin(installed, entry) {
   }
   return { status: 'skip', reason: 'undecidable' };
 }
+
+// 版本号显示:sha 形态(12-40 位 hex)截前 12 位,其余原样
+export function shortVer(v) {
+  if (typeof v !== 'string') return '?';
+  return /^[0-9a-f]{12,40}$/i.test(v) ? v.slice(0, 12) : v;
+}
+
+// "name@marketplace" → [name, marketplace];无 @ 时 marketplace 为空串
+export function splitKey(key) {
+  const at = key.lastIndexOf('@');
+  return at > 0 ? [key.slice(0, at), key.slice(at + 1)] : [key, ''];
+}
+
+// updates: [{ plugin, from, to }](from/to 已经过 shortVer)
+// stale: [[marketplaceName, days]]  刷新失败且缓存过期的附注
+export function buildOutput(updates, stale = []) {
+  if (!Array.isArray(updates) || updates.length === 0) return null;
+  const lines = updates.map((u) => {
+    const [pname, mname] = splitKey(u.plugin);
+    return `  • ${pname} ${u.from} → ${u.to} (${mname})`;
+  });
+  const cmds = updates.map((u) => `  claude plugin update ${u.plugin}`);
+  let systemMessage =
+    `🔄 ${updates.length} 个 Claude Code 插件有更新:\n` +
+    lines.join('\n') + '\n' +
+    '更新命令:\n' + cmds.join('\n') + '\n' +
+    '更新后重启会话或运行 /reload-plugins 生效。';
+  for (const [name, days] of stale) {
+    systemMessage += `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`;
+  }
+  const additionalContext =
+    `[update-checker] 有 ${updates.length} 个插件可更新:${updates.map((u) => u.plugin).join('、')}。` +
+    '用户要求更新时,逐条执行 claude plugin update <name@marketplace>,' +
+    '并提醒更新后需重启会话或运行 /reload-plugins。';
+  return {
+    systemMessage,
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
+  };
+}

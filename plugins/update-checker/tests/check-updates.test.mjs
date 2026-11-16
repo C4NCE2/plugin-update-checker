@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
-  comparePlugin,
+  comparePlugin, shortVer, buildOutput,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -121,4 +121,34 @@ test('comparePlugin: 条目 sha 为空串 → skip(不误报 update)', () => {
   );
   assert.equal(r.status, 'skip');
   assert.equal(r.reason, 'url-no-sha');
+});
+
+test('shortVer: semver 原样;长 sha 截 12 位;12 位 sha 原样;非字符串 → ?', () => {
+  assert.equal(shortVer('5.1.0'), '5.1.0');
+  assert.equal(shortVer('f2cbfbefebbfef77321e4c9abc9e949826bea9d7'), 'f2cbfbefebbf');
+  assert.equal(shortVer('da20c92503b2'), 'da20c92503b2');
+  assert.equal(shortVer(undefined), '?');
+});
+
+test('buildOutput: 空数组 → null', () => {
+  assert.equal(buildOutput([]), null);
+});
+
+test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
+  const out = buildOutput(
+    [
+      { plugin: 'superpowers@claude-plugins-official', from: '5.1.0', to: 'f2cbfbefebbf' },
+      { plugin: 'andrej-karpathy-skills@karpathy-skills', from: '1.0.0', to: '1.1.0' },
+    ],
+    [['karpathy-skills', 3]],
+  );
+  assert.match(out.systemMessage, /2 个 Claude Code 插件有更新/);
+  assert.match(out.systemMessage, /superpowers 5\.1\.0 → f2cbfbefebbf \(claude-plugins-official\)/);
+  assert.match(out.systemMessage, /claude plugin update superpowers@claude-plugins-official/);
+  assert.match(out.systemMessage, /claude plugin update andrej-karpathy-skills@karpathy-skills/);
+  assert.match(out.systemMessage, /\/reload-plugins/);
+  assert.match(out.systemMessage, /karpathy-skills 版本信息已过期 3 天/);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
+  assert.match(out.hookSpecificOutput.additionalContext, /superpowers@claude-plugins-official/);
+  assert.match(out.hookSpecificOutput.additionalContext, /claude plugin update/);
 });
