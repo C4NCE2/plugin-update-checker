@@ -126,7 +126,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 1. marketplace 中找不到同名条目 → 跳过(不提醒,不报错)。
 2. 形态 a:条目 `source.sha` 与已装 `gitCommitSha` **全等** → 最新;不等 → 有更新。(已知限制:若上游条目使用截断 sha 而已装侧为完整 sha,全等比较会持续报有更新;附录 A 取证真实数据两侧均为完整 sha,接受此风险。条目 `sha` 为空串视同"无 sha",走 skip,不误报更新。)
-3. 形态 b:条目 `version` 与已装 `version` **字符串相等** → 最新;不等 → 有更新。(不做 semver 排序,marketplace 即"最新"的事实来源。若已装 version 是 sha 回退值而与条目 version 不等,判为有更新——至多多提醒一次,执行更新后自愈。已装 `version` 缺失或非字符串时不按本规则字面判更新,降级走形态 c 的 repo-check 判定,行为更精确。)
+3. 形态 b:条目 `version` 与已装 `version` **字符串相等** → 最新;不等 → 有更新。(不做 semver 排序,marketplace 即"最新"的事实来源。若已装 version 是 sha 回退值而与条目 version 不等,判为有更新——至多多提醒一次,执行更新后自愈。已装 `version` 缺失或非字符串时不按本规则字面判更新,降级走形态 c 的 repo-check 判定,行为更精确。**已装 version 的取值以安装目录 `.claude-plugin/plugin.json` 为准**——installed_plugins.json 的记录字段可能与实际文件 diverge(dogfood 实证:伪造记录 0.9.0 而文件 1.0.0 时,update 命令比对文件判已最新 no-op,记录不被重写,读记录会永久误报);读不到 manifest 时回退记录字段。)
 4. 形态 c:执行 `git -C <marketplace仓库> diff --quiet <已装gitCommitSha> HEAD -- <条目source路径>`,退出码 0(无差异)→ 最新;1(有差异)→ 有更新;已装 sha 缺失或已不在仓库历史中 → 跳过。**纯本地 git 操作,不产生网络流量。**
 
 提醒中展示:插件名、已装版本(截断 sha 显示前 12 位)、marketplace 名、更新命令。目标版本的显示规则:形态 b 显示新版本号;形态 a/c 显示新 sha 前 12 位或"内容有更新"。
