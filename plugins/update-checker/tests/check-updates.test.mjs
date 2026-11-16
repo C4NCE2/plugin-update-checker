@@ -759,3 +759,66 @@ test('manifest: marketplace 条目 version 与 plugin.json 一致', () => {
   assert.ok(entry);
   assert.equal(entry.version, pj.version);
 });
+
+test('hook-entry fixture: 过期 installed → 提醒 JSON(zh 固定,CI 任意 locale 稳定)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'hf-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-hf-stale-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'hf-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@hf-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40), lastUpdated: '2020-01-01T00:00:00.000Z' }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'hf-mkt': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'hook-entry.mjs');
+  const r = spawnSync(process.execPath, [entry], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, UPDATE_CHECKER_LANG: 'zh' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '');
+  const out = JSON.parse(r.stdout);
+  assert.match(out.systemMessage, /demo 0\.9\.0 → 1\.0\.0 \(hf-mkt\)/);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
+});
+
+test('hook-entry fixture: 全部最新 → 空 stdout、exit 0、空 stderr', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'hf-mkt2', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-hf-cur-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'hf-mkt2');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  const installPath = join(pluginsDir, 'cache', 'hf-mkt2', 'demo', '1.0.0');
+  mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@hf-mkt2': [{ scope: 'user', version: '1.0.0', gitCommitSha: git(origin, 'rev-parse', 'HEAD').trim(), installPath }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'hf-mkt2': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'hook-entry.mjs');
+  const r = spawnSync(process.execPath, [entry], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, UPDATE_CHECKER_LANG: 'zh' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '');
+  assert.equal(r.stderr, '');
+});

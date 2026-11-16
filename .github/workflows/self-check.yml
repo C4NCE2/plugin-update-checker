@@ -1,0 +1,15 @@
+name: self-check
+# Scheduled self-dogfood: run the full suite weekly (Upkeep self-audit analogue).
+on:
+  schedule:
+    - cron: '0 22 * * 0'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test plugins/update-checker/tests/check-updates.test.mjs

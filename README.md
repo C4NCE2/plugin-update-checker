@@ -41,6 +41,9 @@ claude plugin marketplace add C4NCE2/plugin-update-checker && claude plugin inst
 - False-positive resistant: understands Claude Code's stale `gitCommitSha`
   records and record/file divergence, so a plugin you already updated is not
   nagged about.
+- Free to run: detection is deterministic code — no LLM calls, no API cost, no
+  subscription burn. The only network traffic is a throttled `git pull` of your
+  marketplaces (at most once per 24h).
 
 What it looks like in the VSCode panel (Claude relays the reminder at the start
 of its first reply):
@@ -70,6 +73,18 @@ Claude 在第一条回复开头转达。每 24h 至多刷新一次 marketplace �
 Reminder text follows your OS locale (Chinese on zh-* systems, English elsewhere).
 Force a language with `UPDATE_CHECKER_LANG=zh` or `UPDATE_CHECKER_LANG=en` in the
 environment Claude Code runs in (e.g. the `env` block of `~/.claude/settings.json`).
+
+## Configuration (optional)
+
+Zero-config by default. To silence specific marketplaces or plugins, create
+`~/.claude/update-checker.json`:
+
+```json
+{ "ignore": ["karpathy-skills", "some-plugin@some-marketplace"] }
+```
+
+Entries match a marketplace name (skip it entirely) or a plugin key (skip that
+plugin). A missing or malformed file is ignored silently.
 
 ## Development
 

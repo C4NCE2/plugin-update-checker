@@ -133,8 +133,8 @@ SessionStart 触发 → `node check-updates.mjs`:
 
 **"已跟上"判定(dogfood 实证修复,2026-11-16,第二版)**:Claude Code 的 `plugin update` 对 url 源插件可能不回写 `gitCommitSha`(2.1.152/2.1.325 实测:superpowers 5.1.0→7.0.2 后 sha 仍为旧值,新缓存目录无 .git;已最新时重跑 update 在本机因 EBUSY 失败且不重写记录),导致 sha 系形态(a/c)在正当更新后误报。第一版"提醒指纹"方案对"产品部署前已完成的更新"无效(首条指纹即更新后状态),故弃用,改为**更新新近性判定**——纯本地 git 历史信号,不依赖 state、不依赖 update 命令行为:
 
-- 形态 a:用 pickaxe 查 pin sha 写入 marketplace 清单的提交日期 `D = git log -1 --format=%cI --diff-merges=first-parent -S"<entry.sha>" -- .claude-plugin/marketplace.json`;若 `rec.lastUpdated > D` → 用户的更新发生在该 pin 成为目标之后,视为已跟上(current),否则提醒。
-- 形态 c:查插件子目录最后变更日期 `D = git log -1 --format=%cI --diff-merges=first-parent -- <subPath>`;若 `rec.lastUpdated > D` → 已跟上,否则提醒。
+- 形态 a:用 pickaxe 查 pin sha 写入 marketplace 清单的提交日期 `D = git log -1 --format=%cI --diff-merges=first-parent --no-patch -S"<entry.sha>" -- .claude-plugin/marketplace.json`;若 `rec.lastUpdated > D` → 用户的更新发生在该 pin 成为目标之后,视为已跟上(current),否则提醒。
+- 形态 c:查插件子目录最后变更日期 `D = git log -1 --format=%cI --diff-merges=first-parent --no-patch -- <subPath>`;若 `rec.lastUpdated > D` → 已跟上,否则提醒。
 - **git flag 纪律(v0.1.2,学自 Upkeep src/gitmeta.ts)**:所有 `git log` 加 `--diff-merges=first-parent`(merge-only 变更不漏,否则新近性日期偏旧致误 nag);所有 git 调用加 `-c core.quotePath=false`(非 ASCII 路径不被转义,防中文插件名/路径失配)。`git diff A B` 为两树直接比较,不涉及 merge 遍历,无需 diff-merges。
 - 形态 b:version 比较天然自愈,不参与。
 - D 查不到/时间戳无效/预算不足 → 保守提醒(nag 语义保留:未更新则每次提醒)。
