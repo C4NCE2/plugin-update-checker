@@ -263,6 +263,22 @@ SessionStart 触发 → `node check-updates.mjs`:
 - **i18n 是被测试的契约**:zh/en 输出须有结构 parity 测试(行数/ bullet 行/命令行/键结构相同,仅标签文本不同),防改一语忘另一语(学自 Upkeep test/locale-parity.test.ts,缩放版)。
 - **版本双写须有 parity 测试**:marketplace 条目 version 与 plugin.json version 一致(目录站展示依赖条目 version)。
 
+## 12.3 CI 通道(v0.1.2,学自 Upkeep reusable workflow + issue upsert)
+
+团队级 nag:不依赖谁开 session,CI 定时检查**仓库声明的插件依赖**并 upsert tracking issue。
+
+- **lockfile**:`.claude/plugin-lock.json`(仓库提交),形状为 installed_plugins.json 的子集加 marketplace 源:
+  ```json
+  {
+    "marketplaces": { "<name>": { "source": "github", "repo": "<owner>/<repo>" } },
+    "plugins": { "<name@marketplace>": { "version": "...", "gitCommitSha": "...", "lastUpdated": "..." } }
+  }
+  ```
+- **scripts/ci-check.mjs**:读 lock → 逐 marketplace 全量 clone 到临时目录(保证形态 c 的 sha 在历史中)→ 复用 comparePlugin/repoPluginChanged/isCaughtUp/shortVer/splitKey 比对 → 输出 markdown 报告(stdout + 可选文件);无 drift 输出 "all up to date" 标记;恒 exit 0;lock 缺失 → 提示无 lock 并 exit 0。
+- **.github/workflows/update-check.yml**:`workflow_call`(inputs: lock_path、issue_label;secrets: 可选 token,回退 github.token)+ `schedule`(每周)+ `workflow_dispatch`;permissions contents:read/issues:write;步骤:checkout → setup-node → ci-check → **gh issue upsert**(按 label 找 open tracking issue,有 drift 则 create/edit body,无 drift 则关闭既有 issue)。消费方:`uses: C4NCE2/plugin-update-checker/.github/workflows/update-check.yml@v0.1.2`。
+- **自 dogfood cron**:.github/workflows/self-check.yml 每周 cron + dispatch 跑全测试套件;另在测试套件内加 2 个 hook-entry fixture 集成测试(stale fixture → 提醒 JSON;current fixture → 空输出),使手动 dogfood 矩阵在 CI 可复跑(学自 Upkeep self-audit.yml)。
+- 通道权衡诚实记录:CI 通道检查的是 lock 声明依赖,不是运行中机器的实际安装;两者互补(session hook 管本机,CI 管团队声明)。
+
 ## 13. 风险清单
 
 1. `systemMessage` 在 VSCode 面板的渲染效果未经实测(schema 支持已取证)→ dogfood 第一项验证。
