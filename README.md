@@ -2,6 +2,11 @@
 
 [![tests](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml/badge.svg)](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml)
 
+**Hard facts:** 50 tests (TDD) · CI matrix Node 18/20/24 + weekly self-dogfood ·
+hook always exits 0 and never writes stderr (session start is never blocked) ·
+silent degradation on network/manifest failures · zero runtime dependencies ·
+zero LLM calls (detection is deterministic code) · [Changelog](CHANGELOG.md).
+
 A Claude Code plugin that reminds you, at every session start, when any of your
 installed Claude Code plugins has an update available — across **all** your
 marketplaces, including third-party ones. Works in the CLI and in the VSCode
@@ -86,10 +91,27 @@ Zero-config by default. To silence specific marketplaces or plugins, create
 Entries match a marketplace name (skip it entirely) or a plugin key (skip that
 plugin). A missing or malformed file is ignored silently.
 
+## Sources & trust
+
+- Works with any marketplace Claude Code can register whose git remote is
+  reachable: public GitHub, self-hosted/intranet git. Reminders show each
+  marketplace's source repo so you can judge provenance at the point of action.
+- **Private repositories requiring credentials are deliberately unsupported**:
+  git runs fully non-interactive (no credential prompts, no GUI popups). Such
+  marketplaces degrade silently to cached data with a stale note.
+- Offline: comparison still runs against cached manifests; failed refreshes are
+  retried after a 1h backoff and named in the stale note.
+- **Trust model:** a reminder is an install nudge. It inherits the trust of the
+  marketplace you registered. The Claude Code plugin ecosystem has no package
+  signing; this plugin does not invent one. Register only marketplaces you
+  trust; the provenance line exists so you can check before acting.
+- This plugin never executes plugin code, never writes outside
+  `~/.claude/plugins/data/update-checker/`, and never contacts Anthropic.
+
 ## Development
 
 - Design spec: `docs/superpowers/specs/2026-11-13-plugin-update-checker-design.md`
-- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (48 tests)
+- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (50 tests)
 - Debug: set `UPDATE_CHECKER_DEBUG=1`, logs go to
   `~/.claude/plugins/data/update-checker/debug.log`
 - **Release discipline: bump `plugins/update-checker/.claude-plugin/plugin.json`
