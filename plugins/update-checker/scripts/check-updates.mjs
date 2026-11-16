@@ -28,6 +28,12 @@ export function installedVersion(installPath) {
   return m && typeof m.version === 'string' && m.version ? m.version : null;
 }
 
+// 忽略配置(v0.1.2):<configDir>/update-checker.json 的 ignore 数组;缺失/损坏 → []
+export function loadIgnore(cfg) {
+  const c = readJsonSafe(join(cfg, 'update-checker.json'));
+  return Array.isArray(c?.ignore) ? c.ignore.filter((x) => typeof x === 'string') : [];
+}
+
 // 距上次成功刷新 >= ttl 才需要刷新;无记录/坏记录视为需要
 export function needsRefresh(state, name, now, ttlMs = TTL_MS) {
   const t = Date.parse(state?.lastRefresh?.[name] ?? '');
@@ -218,6 +224,7 @@ export function run(now = Date.now(), lang = resolveLang()) {
   const installed = readJsonSafe(join(pluginsDir, 'installed_plugins.json'));
   const known = readJsonSafe(join(pluginsDir, 'known_marketplaces.json'));
   if (!installed?.plugins || !known) { debug(cfg, 'missing state files'); return null; }
+  const ignore = loadIgnore(cfg);
   const pluginEntries = Object.entries(installed.plugins);
   if (pluginEntries.length === 0) return null;
 
@@ -232,6 +239,7 @@ export function run(now = Date.now(), lang = resolveLang()) {
   const stale = [];            // [marketplace 名, 过期天数, 是否刷新失败]
 
   for (const [name, mkt] of Object.entries(known)) {
+    if (ignore.includes(name)) { debug(cfg, 'ignored marketplace', name); continue; }
     const dir = mkt?.installLocation;
     if (typeof dir !== 'string' || !dir || !existsSync(join(dir, '.git'))) { debug(cfg, 'skip non-git marketplace', name); continue; }
 
@@ -267,6 +275,7 @@ export function run(now = Date.now(), lang = resolveLang()) {
   for (const [key, records] of pluginEntries) {
     const rec0 = Array.isArray(records) ? records[0] : records; // 多 scope 取首条
     const [pname, mname] = splitKey(key);
+    if (ignore.includes(key)) continue;
     const mkt = manifests.get(mname);
     if (!rec0 || !mkt) continue;
     // 已装版本以安装目录 plugin.json 为准(记录字段可能与实际文件 diverge);读不到回退记录

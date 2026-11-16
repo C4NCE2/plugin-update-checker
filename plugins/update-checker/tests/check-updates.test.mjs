@@ -9,7 +9,7 @@ import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput, resolveLang,
   repoPluginChanged, refreshMarketplace,
-  run, isCaughtUp, targetDate, installedVersion,
+  run, isCaughtUp, targetDate, installedVersion, loadIgnore,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -662,4 +662,100 @@ test('buildOutput: stale 附注点名刷新失败(zh/en)', () => {
   assert.match(zh.systemMessage, /注:m 刷新失败,版本信息已过期 5 天,可能不准/);
   const en = buildOutput(u, [['m', 5, true]], 'en');
   assert.match(en.systemMessage, /note: m refresh failed; version info is 5 days old and may be inaccurate/);
+});
+
+test('loadIgnore: 缺失/损坏/非数组 → [];过滤非字符串', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'uc-ig-'));
+  assert.deepEqual(loadIgnore(dir), []);
+  writeFileSync(join(dir, 'update-checker.json'), '{broken');
+  assert.deepEqual(loadIgnore(dir), []);
+  writeFileSync(join(dir, 'update-checker.json'), JSON.stringify({ ignore: 'x' }));
+  assert.deepEqual(loadIgnore(dir), []);
+  writeFileSync(join(dir, 'update-checker.json'), JSON.stringify({ ignore: ['a', 5, 'b'] }));
+  assert.deepEqual(loadIgnore(dir), ['a', 'b']);
+});
+
+test('run(): ignore 配置跳过 marketplace 与插件 key;非法配置不生效', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'ig-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-ig-e2e-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'ig-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@ig-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'ig-mkt': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  writeFileSync(join(cfg, 'update-checker.json'), JSON.stringify({ ignore: ['ig-mkt'] }));
+  withConfigDir(cfg, () => assert.equal(run(), null));
+  writeFileSync(join(cfg, 'update-checker.json'), JSON.stringify({ ignore: ['demo@ig-mkt'] }));
+  withConfigDir(cfg, () => assert.equal(run(), null));
+  writeFileSync(join(cfg, 'update-checker.json'), JSON.stringify({ ignore: 'not-array' }));
+  withConfigDir(cfg, () => assert.ok(run()));
+});
+
+test('run(): 只读比对阶段零改动(marketplace 工作树/HEAD 与安装目录)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(origin, 'plugins', 'demo'), { recursive: true });
+  writeFileSync(join(origin, 'plugins', 'demo', 'plugin.txt'), 'x');
+  const manifest = { name: 'ro-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-ro-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'ro-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  const installPath = join(pluginsDir, 'cache', 'ro-mkt', 'demo', '1.0.0');
+  mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'demo', version: '1.0.0' }));
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@ro-mkt': [{ scope: 'user', version: '1.0.0', gitCommitSha: git(origin, 'rev-parse', 'HEAD').trim(), installPath }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'ro-mkt': { source: { source: 'github', repo: 'a/b' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  mkdirSync(join(pluginsDir, 'data', 'update-checker'), { recursive: true });
+  writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), JSON.stringify({ lastRefresh: { 'ro-mkt': new Date().toISOString() } }));
+  const snap = () => ({
+    status: git(mktDir, 'status', '--porcelain'),
+    head: git(mktDir, 'rev-parse', 'HEAD'),
+    installed: readFileSync(join(installPath, '.claude-plugin', 'plugin.json'), 'utf8'),
+  });
+  const before = snap();
+  withConfigDir(cfg, () => assert.equal(run(), null));
+  assert.deepEqual(snap(), before);
+});
+
+test('buildOutput: zh/en 结构 parity(行数/bullet/命令/键结构)', () => {
+  const u = [{ plugin: 'a@m', from: '1.0', to: '2.0' }, { plugin: 'b@m', from: '1', to: '2' }];
+  const s = [['m', 3, true]];
+  const zh = buildOutput(u, s, 'zh');
+  const en = buildOutput(u, s, 'en');
+  const zl = zh.systemMessage.split('\n'), el = en.systemMessage.split('\n');
+  assert.equal(zl.length, el.length);
+  assert.deepEqual(zl.filter((l) => l.startsWith('  • ')), el.filter((l) => l.startsWith('  • ')));
+  assert.deepEqual(zl.filter((l) => l.startsWith('  claude plugin update ')), el.filter((l) => l.startsWith('  claude plugin update ')));
+  assert.equal(zh.hookSpecificOutput.additionalContext.split('\n').length, en.hookSpecificOutput.additionalContext.split('\n').length);
+  assert.equal(zh.hookSpecificOutput.hookEventName, en.hookSpecificOutput.hookEventName);
+});
+
+test('manifest: marketplace 条目 version 与 plugin.json 一致', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const mp = JSON.parse(readFileSync(join(root, '.claude-plugin', 'marketplace.json'), 'utf8'));
+  const pj = JSON.parse(readFileSync(join(root, 'plugins', 'update-checker', '.claude-plugin', 'plugin.json'), 'utf8'));
+  const entry = mp.plugins.find((p) => p.name === pj.name);
+  assert.ok(entry);
+  assert.equal(entry.version, pj.version);
 });
