@@ -16,6 +16,11 @@ export function readJsonSafe(path) {
   }
 }
 
+// 只接受 plain object;标量/数组/null 一律视为空对象(防损坏 state 引发属性赋值 TypeError)
+export function asObject(v) {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+}
+
 // 距上次成功刷新 >= ttl 才需要刷新;无记录/坏记录视为需要
 export function needsRefresh(state, name, now, ttlMs = TTL_MS) {
   const t = Date.parse(state?.lastRefresh?.[name] ?? '');
@@ -133,6 +138,16 @@ export function repoPluginChanged(repoDir, sha, subPath, timeoutMs = PULL_TIMEOU
   }
 }
 
+// 读取 marketplace 仓库 HEAD sha(形态 c 的提醒指纹);失败 → null
+export function repoHeadSha(repoDir) {
+  try {
+    return execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'],
+      { timeout: PULL_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
 export const STALE_NOTE_MS = 48 * 60 * 60 * 1000; // 缓存超过 48h 未刷新成功 → 提醒附注
 export const TOTAL_BUDGET_MS = 10 * 1000;          // 全脚本时间预算
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -168,8 +183,9 @@ export function run(now = Date.now()) {
   const statePath = join(stateDirFor(cfg), 'state.json');
   const rawState = readJsonSafe(statePath);
   const state = rawState && typeof rawState === 'object' ? rawState : {};
-  state.lastRefresh = state.lastRefresh || {};
-  state.lastFailure = state.lastFailure || {};
+  state.lastRefresh = asObject(state.lastRefresh);
+  state.lastFailure = asObject(state.lastFailure);
+  state.reminded = asObject(state.reminded);
 
   const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
   const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
@@ -213,7 +229,9 @@ export function run(now = Date.now()) {
     const [pname, mname] = splitKey(key);
     const mkt = manifests.get(mname);
     if (!rec || !mkt) continue;
-    let cmp = comparePlugin(rec, mkt.byName.get(pname) ?? null);
+    const entry = mkt.byName.get(pname) ?? null;
+    let cmp = comparePlugin(rec, entry);
+    let fp = null; // 提醒指纹:仅 sha 系形态(a/c)需要"已更新"抑制
     if (cmp.status === 'repo-check') {
       // 规则4:本地 git diff 判定插件子目录是否有变更;同样受总预算约束,预算不足视为无法判定
       const remaining = budgetEnd - Date.now();
@@ -225,9 +243,24 @@ export function run(now = Date.now()) {
         : changed === false
           ? { status: 'current' }
           : { status: 'skip', reason: 'undecidable' };
+      if (cmp.status === 'update') fp = repoHeadSha(mkt.dir);
+    } else if (cmp.status === 'update' && entry && entry.source && typeof entry.source === 'object'
+               && typeof entry.source.sha === 'string' && entry.source.sha) {
+      fp = entry.source.sha;
     }
     if (cmp.status === 'update') {
+      // Claude Code 的 plugin update 可能不回写 gitCommitSha(dogfood 实证):
+      // marketplace 目标未变、但已装记录自上次提醒后变化 → 视为用户已更新,不再提醒;
+      // 目标再次变化 → 重新提醒。记录未变 → 保持 nag。
+      const prev = state.reminded[key];
+      if (fp && prev && prev.fp === fp
+          && (rec.version !== prev.version || rec.lastUpdated !== prev.lastUpdated)) {
+        continue;
+      }
+      if (fp) state.reminded[key] = { fp, version: rec.version, lastUpdated: rec.lastUpdated };
       updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to) });
+    } else if (cmp.status === 'current') {
+      delete state.reminded[key];
     }
   }
 

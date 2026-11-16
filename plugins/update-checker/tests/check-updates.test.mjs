@@ -313,7 +313,7 @@ test('run(): 损坏 state.json(标量)与非字符串 installLocation → 不抛
   withConfigDir(cfg, () => {
     assert.equal(run(), null); // 不抛 TypeError;无可比对 marketplace → 静默
     const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
-    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {} });
+    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {}, reminded: {} });
   });
 });
 
@@ -375,4 +375,80 @@ test('hook-entry: 空配置目录下 exit 0、stdout/stderr 均为空', () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
   assert.equal(r.stderr, '');
+});
+
+test('run(): sha 系误报自愈 — 更新后已装记录变化而 marketplace sha 未变 → 不再提醒;nag 保留;sha 再变 → 再提醒', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = {
+    name: 'test-mkt-a',
+    plugins: [{ name: 'urlp', source: { source: 'url', url: 'https://example.com/x.git', sha: 'a'.repeat(40) } }],
+  };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-cfg-a-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt-a');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  const installedPath = join(pluginsDir, 'installed_plugins.json');
+  const writeInstalled = (version, lastUpdated) => writeFileSync(installedPath, JSON.stringify({
+    version: 2,
+    plugins: { 'urlp@test-mkt-a': [{ scope: 'user', version, gitCommitSha: 'b'.repeat(40), lastUpdated }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt-a': {
+      source: { source: 'github', repo: 'a/b' },
+      installLocation: mktDir,
+      lastUpdated: new Date().toISOString(),
+    },
+  }));
+
+  withConfigDir(cfg, () => {
+    // 1) 已装 sha(b) ≠ 条目 sha(a) → 提醒
+    writeInstalled('5.1.0', '2026-06-24T09:17:06.080Z');
+    const out1 = run();
+    assert.ok(out1);
+    assert.match(out1.systemMessage, /urlp 5\.1\.0 → aaaaaaaaaaaa \(test-mkt-a\)/);
+
+    // 1b) 已装记录未变 → 继续提醒(nag)
+    assert.ok(run());
+
+    // 2) 模拟 claude plugin update:version/lastUpdated 变化但 gitCommitSha 陈旧(真机 bug 复现)→ 静默
+    writeInstalled('7.0.2', new Date().toISOString());
+    assert.equal(run(), null);
+
+    // 3) marketplace sha 再变 → 重新提醒(保留 reminded,仅重置刷新节流以触发 pull)
+    manifest.plugins[0].source.sha = 'c'.repeat(40);
+    writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+    git(origin, 'add', '.');
+    git(origin, 'commit', '-m', 'm2');
+    const statePath = join(pluginsDir, 'data', 'update-checker', 'state.json');
+    const st = JSON.parse(readFileSync(statePath, 'utf8'));
+    st.lastRefresh = {};
+    writeFileSync(statePath, JSON.stringify(st));
+    const out3 = run();
+    assert.ok(out3);
+    assert.match(out3.systemMessage, /urlp 7\.0\.2 → cccccccccccc \(test-mkt-a\)/);
+  });
+});
+
+test('run(): state 嵌套字段损坏(lastRefresh 标量/reminded 字符串)→ 不抛错,降级并自愈重写', () => {
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-nested-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'data', 'update-checker'), { recursive: true });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@test-mkt': [{ scope: 'user', version: '1.0.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({}));
+  writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), '{"lastRefresh":5,"reminded":"x"}');
+
+  withConfigDir(cfg, () => {
+    assert.equal(run(), null);
+    const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
+    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {}, reminded: {} });
+  });
 });
