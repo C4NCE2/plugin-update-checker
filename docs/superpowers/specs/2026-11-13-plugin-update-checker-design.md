@@ -164,6 +164,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 - `systemMessage` 面向 CLI 终端用户;**VSCode 面板不渲染 systemMessage**(2.1.325 实证:webview 无渲染逻辑,extension.js 仅内部状态字段),故 `additionalContext` 承担跨环境可见性:以"转达指令 + 完整提醒正文"指示模型在首条回复开头原样转达提醒,然后照常回应用户;同时支撑"会话里说一句就帮我更新"的一键体验。
 - 若某 marketplace 缓存过期 > 48h,systemMessage 末尾附注:`(注:<marketplace> 版本信息已过期 N 天,可能不准)`;**若该 marketplace 存在 lastFailure 记录,附注点名失败**(v0.1.2,学自 Upkeep"点名失败"降级哲学):`(注:<marketplace> 刷新失败,版本信息已过期 N 天,可能不准)` / en `(note: <mkt> refresh failed; version info is N day(s) old and may be inaccurate)`。stale 三元组 `[name, days, failed]`。
 - `claude plugin update` 需要重启生效(二进制取证:"restart required to apply";2.1.323 支持 `/reload-plugins`),文案必须带上这一点。
+- **来源溯源行(v0.1.3)**:updates 元素携带 `src`(marketplace source 为 github → `source.repo`;directory → `local directory`;其余省略)。buildOutput 在 bullet 行之后、命令标签之前输出**去重**来源行:`  来源: m1=owner/repo; m2=local directory` / en `  sources: m1=owner/repo; m2=local directory`;无任何已知来源则省略该行。理由:提醒本质是安装引导,发布者必须在行动点可见(回应供应链"来源提醒"缺口,零新增网络)。bullet 格式保持不变。
 
 ### 8.1 语言解析(v0.1.1)
 
@@ -280,6 +281,11 @@ SessionStart 触发 → `node check-updates.mjs`:
 - **.github/workflows/update-check.yml**:`workflow_call`(inputs: lock_path、issue_label;secrets: 可选 token,回退 github.token)+ `schedule`(每周)+ `workflow_dispatch`;permissions contents:read/issues:write;步骤:checkout → setup-node → ci-check → **gh issue upsert**(按 label 找 open tracking issue,有 drift 则 create/edit body,无 drift 则关闭既有 issue)。消费方:`uses: C4NCE2/plugin-update-checker/.github/workflows/update-check.yml@v0.1.2`。
 - **自 dogfood cron**:.github/workflows/self-check.yml 每周 cron + dispatch 跑全测试套件;另在测试套件内加 2 个 hook-entry fixture 集成测试(stale fixture → 提醒 JSON;current fixture → 空输出),使手动 dogfood 矩阵在 CI 可复跑(学自 Upkeep self-audit.yml)。
 - 通道权衡诚实记录:CI 通道检查的是 lock 声明依赖,不是运行中机器的实际安装;两者互补(session hook 管本机,CI 管团队声明)。
+
+## 12.4 v0.1.3 范围(用户决策:只做必做项)
+
+**做**:① 开源三件套(CHANGELOG.md、issue/PR 模板、tag push 自动 Release workflow);② README 硬事实前置(测试数/CI/恒 exit 0/静默降级/零依赖零 LLM)+ "Sources & trust" 威胁模型与源限制段;③ 提醒来源溯源行(§8)。
+**不做及理由**:JSDoc 类型注释(编辑器级收益,贡献者需求未现)、冷启动延迟治理(方案 A 收紧预算伤慢网刷新成功率;方案 B detached 后台刷新加并发复杂度 → v0.2 评估)、自定义钩子/弹窗/下载回调/私有鉴权/签名校验(设计边界,见 §3 与 §12.2;生态无签名体系,自造=安全剧场)。
 
 ## 13. 风险清单
 
