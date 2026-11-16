@@ -1,6 +1,6 @@
 {
   "name": "update-checker",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Session-start update reminders for all installed Claude Code plugins.",
   "author": { "name": "yangzhuocheng" },
   "homepage": "https://github.com/C4NCE2/plugin-update-checker",

@@ -105,8 +105,9 @@ plugin). A missing or malformed file is ignored silently.
   marketplace you registered. The Claude Code plugin ecosystem has no package
   signing; this plugin does not invent one. Register only marketplaces you
   trust; the provenance line exists so you can check before acting.
-- This plugin never executes plugin code, never writes outside
-  `~/.claude/plugins/data/update-checker/`, and never contacts Anthropic.
+- This plugin never executes plugin code and never contacts Anthropic. Writes
+  stay inside `~/.claude/plugins/`: its own state in `data/update-checker/`,
+  plus throttled `git pull` refreshing marketplace caches in place.
 
 ## Development
 
