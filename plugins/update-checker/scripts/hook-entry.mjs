@@ -11,4 +11,4 @@ try {
 if (out) {
   try { process.stdout.write(JSON.stringify(out)); } catch { /* 忽略 */ }
 }
-process.exit(0);
+process.exitCode = 0; // 自然退出保证 stdout flush;exit code 恒 0

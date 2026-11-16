@@ -151,7 +151,7 @@ export function debug(cfg, ...args) {
   try {
     const dir = stateDirFor(cfg);
     mkdirSync(dir, { recursive: true });
-    appendFileSync(join(dir, 'debug.log'), `${new Date().toISOString()} ${args.join(' ')}\n`);
+    appendFileSync(join(dir, 'debug.log'), `${new Date().toISOString()} ${args.map((a) => String(a).replace(/[\r\n]+/g, ' ')).join(' ')}\n`);
   } catch { /* 调试路径不冒泡任何错误 */ }
 }
 
@@ -166,17 +166,18 @@ export function run(now = Date.now()) {
   if (pluginEntries.length === 0) return null;
 
   const statePath = join(stateDirFor(cfg), 'state.json');
-  const state = readJsonSafe(statePath) || {};
+  const rawState = readJsonSafe(statePath);
+  const state = rawState && typeof rawState === 'object' ? rawState : {};
   state.lastRefresh = state.lastRefresh || {};
   state.lastFailure = state.lastFailure || {};
 
-  const budgetEnd = now + TOTAL_BUDGET_MS;
+  const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
   const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
   const stale = [];            // [marketplace 名, 过期天数]
 
   for (const [name, mkt] of Object.entries(known)) {
     const dir = mkt?.installLocation;
-    if (!dir || !existsSync(join(dir, '.git'))) { debug(cfg, 'skip non-git marketplace', name); continue; }
+    if (typeof dir !== 'string' || !dir || !existsSync(join(dir, '.git'))) { debug(cfg, 'skip non-git marketplace', name); continue; }
 
     if (needsRefresh(state, name, now) && !recentFailure(state, name, now)) {
       const remaining = budgetEnd - Date.now();
@@ -199,7 +200,8 @@ export function run(now = Date.now()) {
       byName: new Map(manifest.plugins.filter((p) => p && p.name).map((p) => [p.name, p])),
     });
 
-    const lastT = Date.parse(state.lastRefresh[name] ?? mkt?.lastUpdated ?? '');
+    let lastT = Date.parse(state.lastRefresh[name] ?? '');
+    if (Number.isNaN(lastT)) lastT = Date.parse(mkt?.lastUpdated ?? '');
     if (!Number.isNaN(lastT) && now - lastT > STALE_NOTE_MS) {
       stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS))]);
     }

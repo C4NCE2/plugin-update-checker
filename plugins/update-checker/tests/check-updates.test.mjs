@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   needsRefresh, recentFailure, readJsonSafe, TTL_MS,
   comparePlugin, shortVer, splitKey, buildOutput,
@@ -295,4 +295,84 @@ test('run(): 全链路 — 刷新 marketplace、发现更新、输出 hook JSON�
 test('run(): 状态文件缺失 → 静默 null', () => {
   const cfg = mkdtempSync(join(tmpdir(), 'uc-empty-'));
   withConfigDir(cfg, () => assert.equal(run(), null));
+});
+
+test('run(): 损坏 state.json(标量)与非字符串 installLocation → 不抛错,静默降级并重写合法 state', () => {
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-broken-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'data', 'update-checker'), { recursive: true });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@test-mkt': [{ scope: 'user', version: '1.0.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'bad-mkt': { installLocation: 123 },
+  }));
+  writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), '5');
+
+  withConfigDir(cfg, () => {
+    assert.equal(run(), null); // 不抛 TypeError;无可比对 marketplace → 静默
+    const state = JSON.parse(readFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), 'utf8'));
+    assert.deepEqual(state, { lastRefresh: {}, lastFailure: {} });
+  });
+});
+
+test('run(): 形态c(repo-check)— 插件子目录有变更 → "内容有更新";未变更 → 静默', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(origin, 'skills', 'docsk'), { recursive: true });
+  writeFileSync(join(origin, 'skills', 'docsk', 'SKILL.md'), 'v1');
+  const manifest = {
+    name: 'test-mkt-c',
+    plugins: [{ name: 'docsk', source: './skills/docsk' }],
+  };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const sha1 = git(origin, 'rev-parse', 'HEAD').trim();
+
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-cfg-c-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'test-mkt-c');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'docsk@test-mkt-c': [{ scope: 'user', version: sha1.slice(0, 12), gitCommitSha: sha1 }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'test-mkt-c': {
+      source: { source: 'github', repo: 'a/b' },
+      installLocation: mktDir,
+      lastUpdated: new Date().toISOString(),
+    },
+  }));
+
+  withConfigDir(cfg, () => {
+    // 1) 插件子目录无变更 → 静默
+    assert.equal(run(), null);
+
+    // 2) origin 新提交只改插件子目录;重置节流状态模拟次日 → pull 后发现"内容有更新"
+    writeFileSync(join(origin, 'skills', 'docsk', 'SKILL.md'), 'v2');
+    git(origin, 'add', '.');
+    git(origin, 'commit', '-m', 'm2');
+    writeFileSync(join(pluginsDir, 'data', 'update-checker', 'state.json'), '{}');
+
+    const out = run();
+    assert.ok(out, '应产生提醒');
+    assert.match(out.systemMessage, /docsk .*→ 内容有更新 \(test-mkt-c\)/);
+    assert.match(out.systemMessage, /claude plugin update docsk@test-mkt-c/);
+  });
+});
+
+test('hook-entry: 空配置目录下 exit 0、stdout/stderr 均为空', () => {
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-entry-'));
+  const entry = join(import.meta.dirname, '..', 'scripts', 'hook-entry.mjs');
+  const r = spawnSync(process.execPath, [entry], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: cfg },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '');
+  assert.equal(r.stderr, '');
 });
