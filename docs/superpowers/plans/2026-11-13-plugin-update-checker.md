@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-13-plugin-update-checker-design.md`(含已验证的本机文件真实形态,附录 A)
 
+**执行状态(2026-11-16 收尾)**:Task 1-8 全部完成,每任务经 spec 合规 + 代码质量双审;dogfood 四轮修复、v0.1.1 i18n、v0.1.2 竞品学习增量的设计见 spec §12.1/§8.1/§6/§9.1/§12.2;发布 v0.1.0/v0.1.1/v0.1.2(tag 即发布点,后续 docs 提交不影响 tag 内容);v0.2 backlog(CI/lock 团队通道)见 spec §12.3。最终:48 测试、Node 18/20/24 CI 绿、39+ 提交。
+
 ---
 
 ## 前置条件(执行者必读)
@@ -51,7 +53,7 @@ d:\zhuocheng\test\pull_all_the_time\     ← 仓库根 = marketplace
 - Create: `.gitignore`
 - Create: `LICENSE`
 
-- [ ] **Step 1: 初始化 git 仓库(main 分支)**
+- [x] **Step 1: 初始化 git 仓库(main 分支)**
 
 ```bash
 git init
@@ -60,7 +62,7 @@ git symbolic-ref HEAD refs/heads/main
 
 预期:无报错;`git status` 显示未跟踪文件(含 docs/ 下已有的 spec 与本计划)。
 
-- [ ] **Step 2: 写 `.claude-plugin/marketplace.json`**
+- [x] **Step 2: 写 `.claude-plugin/marketplace.json`**
 
 ```json
 {
@@ -77,7 +79,7 @@ git symbolic-ref HEAD refs/heads/main
 }
 ```
 
-- [ ] **Step 3: 写 `plugins/update-checker/.claude-plugin/plugin.json`**
+- [x] **Step 3: 写 `plugins/update-checker/.claude-plugin/plugin.json`**
 
 ```json
 {
@@ -88,7 +90,7 @@ git symbolic-ref HEAD refs/heads/main
 }
 ```
 
-- [ ] **Step 4: 写 `plugins/update-checker/hooks/hooks.json`**
+- [x] **Step 4: 写 `plugins/update-checker/hooks/hooks.json`**
 
 (引用的 `hook-entry.mjs` 在 Task 6 才创建;hook 只在插件安装后触发,顺序无碍。)
 
@@ -109,7 +111,7 @@ git symbolic-ref HEAD refs/heads/main
 }
 ```
 
-- [ ] **Step 5: 写 `.gitignore`**
+- [x] **Step 5: 写 `.gitignore`**
 
 ```
 node_modules/
@@ -117,7 +119,7 @@ node_modules/
 .DS_Store
 ```
 
-- [ ] **Step 6: 写 `LICENSE`(MIT 全文)**
+- [x] **Step 6: 写 `LICENSE`(MIT 全文)**
 
 ```
 MIT License
@@ -143,7 +145,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-- [ ] **Step 7: 验证三个 JSON 可解析**
+- [x] **Step 7: 验证三个 JSON 可解析**
 
 ```bash
 node -e "const fs=require('fs');for(const p of ['.claude-plugin/marketplace.json','plugins/update-checker/.claude-plugin/plugin.json','plugins/update-checker/hooks/hooks.json']){JSON.parse(fs.readFileSync(p,'utf8'));console.log('OK',p)}"
@@ -156,7 +158,7 @@ OK plugins/update-checker/.claude-plugin/plugin.json
 OK plugins/update-checker/hooks/hooks.json
 ```
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add -A
@@ -171,7 +173,7 @@ git commit -m "chore: scaffold marketplace/plugin manifests, license, docs"
 - Create: `plugins/update-checker/scripts/check-updates.mjs`
 - Create: `plugins/update-checker/tests/check-updates.test.mjs`
 
-- [ ] **Step 1: 写失败的测试文件(完整初始内容)**
+- [x] **Step 1: 写失败的测试文件(完整初始内容)**
 
 `plugins/update-checker/tests/check-updates.test.mjs`:
 
@@ -216,7 +218,7 @@ test('readJsonSafe: 文件不存在 → null', () => {
 });
 ```
 
-- [ ] **Step 2: 运行,确认失败**
+- [x] **Step 2: 运行,确认失败**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -224,7 +226,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:FAIL,报 `Cannot find module .../check-updates.mjs`(实现尚不存在)。
 
-- [ ] **Step 3: 写最小实现(文件完整初始内容)**
+- [x] **Step 3: 写最小实现(文件完整初始内容)**
 
 `plugins/update-checker/scripts/check-updates.mjs`:
 
@@ -258,7 +260,7 @@ export function recentFailure(state, name, now) {
 }
 ```
 
-- [ ] **Step 4: 运行,确认通过**
+- [x] **Step 4: 运行,确认通过**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -266,7 +268,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:`pass 6`,`fail 0`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
@@ -281,7 +283,7 @@ git commit -m "feat: core module skeleton with throttled-refresh state helpers"
 - Modify: `plugins/update-checker/scripts/check-updates.mjs`(文件末尾追加)
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import 区)
 
-- [ ] **Step 0(前置):回填 Task 2 质量审查发现的测试缺口**
+- [x] **Step 0(前置):回填 Task 2 质量审查发现的测试缺口**
 
 把测试文件开头的 import 区(原 `import { test } ...` 与 `import assert ...` 两行及模块 import 语句)整体替换为:
 
@@ -326,7 +328,7 @@ git add plugins/update-checker/tests/check-updates.test.mjs
 git commit -m "test: backfill readJsonSafe corrupt-JSON, TTL lock, recentFailure null-state coverage"
 ```
 
-- [ ] **Step 1: 追加失败的测试**
+- [x] **Step 1: 追加失败的测试**
 
 把测试文件开头 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(其余 node 内置 import 保留不动):
 
@@ -387,7 +389,7 @@ test('comparePlugin: url 源但无 sha → skip', () => {
 });
 ```
 
-- [ ] **Step 2: 运行,确认失败**
+- [x] **Step 2: 运行,确认失败**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -395,7 +397,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:FAIL,报 `comparePlugin` 未导出(SyntaxError: does not provide an export named)。
 
-- [ ] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
+- [x] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
 
 ```js
 // 比对单个插件。installed 为 installed_plugins.json 中数组首条记录,
@@ -427,7 +429,7 @@ export function comparePlugin(installed, entry) {
 }
 ```
 
-- [ ] **Step 4: 运行,确认通过**
+- [x] **Step 4: 运行,确认通过**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -435,7 +437,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:`pass 16`,`fail 0`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
@@ -450,7 +452,7 @@ git commit -m "feat: plugin comparison rules a/b/c (sha, version, repo-check mar
 - Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + comparePlugin 一处守护)
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import)
 
-- [ ] **Step 0(前置):Task 3 质量审查收尾(小修 + 测试锁定)**
+- [x] **Step 0(前置):Task 3 质量审查收尾(小修 + 测试锁定)**
 
 按 TDD 顺序:先改测试看到红灯,再修实现。
 
@@ -513,7 +515,7 @@ git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/
 git commit -m "fix: guard empty entry sha; test: lock skip reasons and undecidable branch"
 ```
 
-- [ ] **Step 1: 追加失败的测试**
+- [x] **Step 1: 追加失败的测试**
 
 把 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(其余 node 内置 import 保留不动):
 
@@ -558,7 +560,7 @@ test('buildOutput: systemMessage/additionalContext 结构与文案', () => {
 });
 ```
 
-- [ ] **Step 2: 运行,确认失败**
+- [x] **Step 2: 运行,确认失败**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -566,7 +568,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:FAIL(`shortVer` 未导出)。
 
-- [ ] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
+- [x] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
 
 ```js
 // 版本号显示:sha 形态(12-40 位 hex)截前 12 位,其余原样
@@ -609,7 +611,7 @@ export function buildOutput(updates, stale = []) {
 }
 ```
 
-- [ ] **Step 4: 运行,确认通过**
+- [x] **Step 4: 运行,确认通过**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -617,7 +619,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:`pass 21`,`fail 0`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
@@ -632,7 +634,7 @@ git commit -m "feat: reminder output builder (systemMessage + additionalContext)
 - Modify: `plugins/update-checker/scripts/check-updates.mjs`(末尾追加 + shortVer 一处修改)
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加 helpers 与测试、替换 import)
 
-- [ ] **Step 0(前置):Task 4 质量审查收尾(shortVer 守护 + splitKey 单测)**
+- [x] **Step 0(前置):Task 4 质量审查收尾(shortVer 守护 + splitKey 单测)**
 
 1. 把测试文件 import 区中来自 `'../scripts/check-updates.mjs'` 的 import 语句替换为(加入 splitKey):
 
@@ -685,7 +687,7 @@ git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/
 git commit -m "fix: shortVer empty-string guard and sha-256 length; test: splitKey coverage"
 ```
 
-- [ ] **Step 1: 追加失败的测试**
+- [x] **Step 1: 追加失败的测试**
 
 import 语句块替换为:
 
@@ -772,7 +774,7 @@ test('refreshMarketplace: 拉到 origin 新提交 → true;非 git 目录 → fa
 });
 ```
 
-- [ ] **Step 2: 运行,确认失败**
+- [x] **Step 2: 运行,确认失败**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -780,7 +782,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:FAIL(`repoPluginChanged` 未导出)。
 
-- [ ] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
+- [x] **Step 3: 实现(追加到 check-updates.mjs 末尾)**
 
 同时在文件顶部 import 区追加一行:
 
@@ -819,7 +821,7 @@ export function repoPluginChanged(repoDir, sha, subPath) {
 }
 ```
 
-- [ ] **Step 4: 运行,确认通过**
+- [x] **Step 4: 运行,确认通过**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -827,7 +829,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:`pass 24`,`fail 0`。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/tests/check-updates.test.mjs
@@ -843,7 +845,7 @@ git commit -m "feat: git integration - throttled pull and per-plugin diff detect
 - Create: `plugins/update-checker/scripts/hook-entry.mjs`
 - Modify: `plugins/update-checker/tests/check-updates.test.mjs`(追加测试、替换 import)
 
-- [ ] **Step 0(前置):Task 5 质量审查收尾(非交互 git env + sha 预校验 + diff 超时参数)**
+- [x] **Step 0(前置):Task 5 质量审查收尾(非交互 git env + sha 预校验 + diff 超时参数)**
 
 TDD 顺序:先改测试看红灯,再修实现。
 
@@ -926,7 +928,7 @@ git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/
 git commit -m "fix: non-interactive git env, sha pre-validation, diff timeout param; test: production pathspec form"
 ```
 
-- [ ] **Step 1: 追加失败的端到端测试**
+- [x] **Step 1: 追加失败的端到端测试**
 
 import 语句块中,从 `'../scripts/check-updates.mjs'` 的导入增加 `run`:
 
@@ -1020,7 +1022,7 @@ test('run(): 状态文件缺失 → 静默 null', () => {
 });
 ```
 
-- [ ] **Step 2: 运行,确认失败**
+- [x] **Step 2: 运行,确认失败**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -1028,7 +1030,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:FAIL(`run` 未导出)。
 
-- [ ] **Step 3: 实现 run()(追加到 check-updates.mjs 末尾)**
+- [x] **Step 3: 实现 run()(追加到 check-updates.mjs 末尾)**
 
 先把文件顶部的 fs import 行:
 
@@ -1153,7 +1155,7 @@ export function run(now = Date.now()) {
 }
 ```
 
-- [ ] **Step 4: 创建 `plugins/update-checker/scripts/hook-entry.mjs`(完整内容)**
+- [x] **Step 4: 创建 `plugins/update-checker/scripts/hook-entry.mjs`(完整内容)**
 
 ```js
 #!/usr/bin/env node
@@ -1172,7 +1174,7 @@ if (out) {
 process.exit(0);
 ```
 
-- [ ] **Step 5: 运行全部测试,确认通过**
+- [x] **Step 5: 运行全部测试,确认通过**
 
 ```bash
 node --test plugins/update-checker/tests/check-updates.test.mjs
@@ -1180,7 +1182,7 @@ node --test plugins/update-checker/tests/check-updates.test.mjs
 
 预期:`pass 26`,`fail 0`。
 
-- [ ] **Step 6: 冒烟 — 直接以 hook 方式在真实环境跑一次入口**
+- [x] **Step 6: 冒烟 — 直接以 hook 方式在真实环境跑一次入口**
 
 ```bash
 node plugins/update-checker/scripts/hook-entry.mjs; echo "exit=$?"
@@ -1188,7 +1190,7 @@ node plugins/update-checker/scripts/hook-entry.mjs; echo "exit=$?"
 
 预期:`exit=0`;stdout 为一段 JSON(本机插件确实过期,应有 systemMessage)或空(若全部最新)。绝不出现堆栈/stderr 噪音。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add plugins/update-checker/scripts/check-updates.mjs plugins/update-checker/scripts/hook-entry.mjs plugins/update-checker/tests/check-updates.test.mjs
@@ -1201,7 +1203,7 @@ git commit -m "feat: run() orchestration with budgeted refresh and hook entry"
 
 **Files:** 无新文件;验证性质。若发现 bug,回到对应 Task 的代码修复并补测试。
 
-- [ ] **Step 1: 以本地目录为 marketplace 安装产品**
+- [x] **Step 1: 以本地目录为 marketplace 安装产品**
 
 在 Claude Code 会话中执行:
 
@@ -1214,7 +1216,7 @@ git commit -m "feat: run() orchestration with budgeted refresh and hook entry"
 
 注意:本地路径安装后,后续改代码需执行 `/plugin marketplace update plugin-update-checker` 重新同步才生效。
 
-- [ ] **Step 2: 新开会话,验证提醒出现(VSCode 面板)**
+- [x] **Step 2: 新开会话,验证提醒出现(VSCode 面板)**
 
 关闭当前会话,新开一个 VSCode 面板会话。
 
@@ -1222,13 +1224,13 @@ git commit -m "feat: run() orchestration with budgeted refresh and hook entry"
 
 若未出现:在系统环境变量或 settings.json 的 env 中加 `UPDATE_CHECKER_DEBUG=1`,再新开会话,然后读 `C:\Users\yangzhuocheng\.claude\plugins\data\update-checker\debug.log` 定位;常见原因是 hook 未触发(检查 `/plugin` 里插件是否启用)或 node 不在 PATH。
 
-- [ ] **Step 3: 确定性验证(不依赖上游真的有新版本)**
+- [x] **Step 3: 确定性验证(不依赖上游真的有新版本)**
 
 若 Step 2 没有出现提醒(比如上游恰好无变化),手工制造一个"过期":用编辑器把 `installed_plugins.json` 中 superpowers 的 `version` 改成 `5.0.9`、`gitCommitSha` 改成 40 个 `0`,保存后新开会话。
 
 预期:提醒中出现 superpowers。验证完把两处值改回原样(`5.1.0` / `f2cbfbefebbfef77321e4c9abc9e949826bea9d7`)。
 
-- [ ] **Step 4: 一键更新链路**
+- [x] **Step 4: 一键更新链路**
 
 复制提醒中的命令在终端执行(任选一个真实有更新的插件):
 
@@ -1242,19 +1244,19 @@ claude plugin update <name@marketplace>
 
 预期:Claude 依据 additionalContext 直接执行正确的 `claude plugin update` 命令。
 
-- [ ] **Step 5: 无更新 → 静默**
+- [x] **Step 5: 无更新 → 静默**
 
 把所有插件更新到最新后新开会话。
 
 预期:无任何提醒输出,会话启动无感知延迟。
 
-- [ ] **Step 6: 离线降级**
+- [x] **Step 6: 离线降级**
 
 断开网络(或临时把某 marketplace 缓存仓库的 remote 改成不可达地址:`git -C <installLocation> remote set-url origin https://invalid.example/x.git`),新开会话。
 
 预期:会话正常启动不阻塞(最长约 10s 预算内);无报错;缓存过期超 48h 时提醒带"(注:...已过期 N 天)"附注。测完恢复 remote 原值(`git -C <installLocation> remote get-url origin` 先记录原值)。
 
-- [ ] **Step 7: 记录结果**
+- [x] **Step 7: 记录结果**
 
 在 spec §12 的 dogfood 矩阵旁记录实测结果(通过/失败+现象)。有失败项 → 修复代码、补回归测试、回到本 Task 重跑。
 
@@ -1266,7 +1268,7 @@ claude plugin update <name@marketplace>
 - Rename+Rewrite: `readme.md` → `README.md`
 - Modify: `.gitignore`(无变化则跳过)
 
-- [ ] **Step 1: 重命名(大小写翻转,Windows 下用 git mv)**
+- [x] **Step 1: 重命名(大小写翻转,Windows 下用 git mv)**
 
 ```bash
 git mv readme.md README.md
@@ -1278,7 +1280,7 @@ git mv readme.md README.md
 git mv readme.md README.tmp.md && git mv README.tmp.md README.md
 ```
 
-- [ ] **Step 2: 写入 README.md 完整内容**
+- [x] **Step 2: 写入 README.md 完整内容**
 
 ````markdown
 # plugin-update-checker
@@ -1337,7 +1339,7 @@ marketplace 仓库;只读取本机文件,不访问 Anthropic 端点,无任何遥
 MIT
 ````
 
-- [ ] **Step 3: 验证并提交**
+- [x] **Step 3: 验证并提交**
 
 ```bash
 ls README.md readme.md 2>/dev/null
@@ -1347,7 +1349,7 @@ git commit -m "docs: product README (EN + 中文), rename from readme.md"
 
 预期:`ls` 只列出 `README.md`(readme.md 已不存在,Windows 大小写不敏感故只显示一个)。
 
-- [ ] **Step 4: 发布到 GitHub(需要用户参与)**
+- [x] **Step 4: 发布到 GitHub(需要用户参与)**
 
 **此步骤执行前,向用户询问 GitHub 用户名与仓库名**(默认建议仓库名 `plugin-update-checker`)。用户需先在 GitHub 上创建空仓库(不要初始化 README),然后:
 
@@ -1360,7 +1362,7 @@ git push origin v0.1.0
 
 预期:推送成功。之后用户可把 README 安装命令中的 `<owner>` 替换为真实用户名(改完再提交推送一次)。
 
-- [ ] **Step 5: 发布后端到端复验**
+- [x] **Step 5: 发布后端到端复验**
 
 在**另一台机器**(或删掉本地安装的干净环境)执行 README 里的两条安装命令,新开会话确认提醒链路工作。这是"产品在其他机器可复用"的最终验收。
 

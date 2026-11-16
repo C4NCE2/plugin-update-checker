@@ -247,7 +247,7 @@ SessionStart 触发 → `node check-updates.mjs`:
 | 自举自提醒 | ✅ 安装副本落后仓库 HEAD 时报"内容有更新" |
 | VSCode 面板提醒可见性 | ✅ systemMessage 本身不渲染(2.1.325 源码实证);改模型转达设计(§8)后用户新会话实证:首条回复原样转达提醒再照常回应(2026-11-16 16:13 截图);CLI 终端仍原生渲染 systemMessage |
 | 会话内"帮我更新插件" | ✅ 用户实证:Claude 依 additionalContext 执行更新命令;伪造态 diverge 致 CLI 判已最新 no-op,暴露健壮性缺口 → 5ff50b2 修复(已装版本以安装目录 manifest 为准) |
-| 更新后静默 | ✅ 无头实证:重装 + 恢复演示残留后 stdout 空、exit 0;⏳ 待用户最终新会话复验 |
+| 更新后静默 | ✅ 无头实证:重装 + 恢复演示残留后 stdout 空、exit 0;用户最终新会话复验通过(2026-11-16,"没有提醒前缀了") |
 
 **dogfood 发现与处置:**
 1. Claude Code 对 url 源插件更新后不回写 gitCommitSha(2.1.152/2.1.325 一致),已最新时重跑 update 因 EBUSY(Windows 临时目录锁,Claude Code 自身 bug)失败且不重写记录 → 第一版指纹抑制方案弃用,改为更新新近性判定(§6 v2),真机实证误报消除。
