@@ -63,6 +63,7 @@ test('recentFailure: null state / 损坏时间戳 → false', () => {
 test('comparePlugin: 条目缺失 → skip', () => {
   const r = comparePlugin({ version: '1.0.0', gitCommitSha: 'abc' }, null);
   assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'entry-missing');
 });
 
 test('comparePlugin: 形态a url源 sha 相同 → current', () => {
@@ -103,5 +104,21 @@ test('comparePlugin: 形态c 仓库内置且无 version → repo-check 携带 su
 });
 
 test('comparePlugin: url 源但无 sha → skip', () => {
-  assert.equal(comparePlugin({ gitCommitSha: 'a' }, { name: 'x', source: { source: 'url', url: 'u' } }).status, 'skip');
+  const r = comparePlugin({ gitCommitSha: 'a' }, { name: 'x', source: { source: 'url', url: 'u' } });
+  assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'url-no-sha');
+});
+
+test('comparePlugin: entry.source 缺失/null → skip reason undecidable', () => {
+  assert.equal(comparePlugin({ version: '1.0' }, { name: 'x' }).reason, 'undecidable');
+  assert.equal(comparePlugin({ version: '1.0' }, { name: 'x', source: null }).reason, 'undecidable');
+});
+
+test('comparePlugin: 条目 sha 为空串 → skip(不误报 update)', () => {
+  const r = comparePlugin(
+    { version: '5.1.0', gitCommitSha: 'f2cbfbefebbfef77321e4c9abc9e949826bea9d7' },
+    { name: 'x', source: { source: 'url', sha: '' } },
+  );
+  assert.equal(r.status, 'skip');
+  assert.equal(r.reason, 'url-no-sha');
 });

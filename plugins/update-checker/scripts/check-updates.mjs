@@ -35,7 +35,7 @@ export function comparePlugin(installed, entry) {
   const src = entry.source;
   // 形态 a:外部 url 源,条目带完整 sha → 与已装 gitCommitSha 全等比较
   if (src && typeof src === 'object') {
-    if (typeof src.sha === 'string' && typeof installed.gitCommitSha === 'string' && installed.gitCommitSha) {
+    if (typeof src.sha === 'string' && src.sha && typeof installed.gitCommitSha === 'string' && installed.gitCommitSha) {
       return src.sha === installed.gitCommitSha
         ? { status: 'current' }
         : { status: 'update', from: installed.version, to: src.sha.slice(0, 12) };
