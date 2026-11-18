@@ -287,6 +287,17 @@ SessionStart 触发 → `node check-updates.mjs`:
 **做**:① 开源三件套(CHANGELOG.md、issue/PR 模板、tag push 自动 Release workflow);② README 硬事实前置(测试数/CI/恒 exit 0/静默降级/零依赖零 LLM)+ "Sources & trust" 威胁模型与源限制段;③ 提醒来源溯源行(§8)。
 **不做及理由**:JSDoc 类型注释(编辑器级收益,贡献者需求未现)、冷启动延迟治理(方案 A 收紧预算伤慢网刷新成功率;方案 B detached 后台刷新加并发复杂度 → v0.2 评估)、自定义钩子/弹窗/下载回调/私有鉴权/签名校验(设计边界,见 §3 与 §12.2;生态无签名体系,自造=安全剧场)。
 
+## 12.5 v0.1.4 范围(用户决策:只改最好的 = status 全景报告)
+
+**做**:on-demand 状态报告 `node scripts/status.mjs`(纯读缓存 manifest,零网络、不刷新、不动 hook nag 路径):
+- 从 run() 提取纯函数 `evaluatePlugins(pluginEntries, manifests, known, state, ignore, now)` → {updates, results[]};run() 与 status 共用,防判定漂移(既有 run 测试为重构不变量)。
+- `trustTier(marketplaceSource)`:github 且 owner=anthropics → official;其他 github → organization;directory/其余 → personal(学自 DSH dsh-plugin-list-plus 的 scope 分层,纯 metadata、零网络、诚实标签不冒充签名)。zh:官方/组织/个人。
+- 每插件一行:installed → latest(或 current)/ tier / 状态(update / current / ignored / no-manifest / degraded+stale 天数与是否失败)。
+- 头部:计数 + 各 marketplace 缓存年龄 + ignore 列表说明。lang 走 resolveLang。
+- 面板可达:hook-entry 以自身路径推算 status.mjs 绝对路径,经 buildOutput 可选参 statusCmd 附加一行"状态查询: node \"<path>\""(systemMessage 与 additionalContext 各一行;未传则省略,单测/e2e 不受影响)。
+- README "Inspect status" 段。
+**顺延**:--now 绕节流、版本变迁历史、state 写后校验、skill 表面(v0.1.5 候选)。
+
 ## 13. 风险清单
 
 1. `systemMessage` 在 VSCode 面板的渲染效果未经实测(schema 支持已取证)→ dogfood 第一项验证。
