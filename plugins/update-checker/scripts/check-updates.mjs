@@ -359,7 +359,8 @@ export function run(now = Date.now(), lang = resolveLang(), statusCmd) {
   state.lastRefresh = asObject(state.lastRefresh);
   state.lastFailure = asObject(state.lastFailure);
 
-  const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
+  // 刷新循环预算锚实时钟;evaluatePlugins 预算锚 now 参数(默认实时;注入非实时 now 时两者会分歧)
+  const budgetEnd = Date.now() + TOTAL_BUDGET_MS;
 
   for (const [name, mkt] of Object.entries(known)) {
     if (ignore.includes(name)) { debug(cfg, 'ignored marketplace', name); continue; }
