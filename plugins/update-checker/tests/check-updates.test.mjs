@@ -878,17 +878,20 @@ test('buildStatus: 逐插件状态/tier/stale/ignore(zh/en)', () => {
     { key: 'b@m1', state: 'current', installed: '1.0.0', tier: 'official' },
     { key: 'c@m2', state: 'ignored', tier: 'personal' },
     { key: 'd@m3', state: 'no-manifest', tier: 'personal' },
+    { key: 'e@m4', state: 'update', installed: '1', target: '2', tier: 'organization' },
   ];
-  const zh = buildStatus(results, [['m1', 5, true]], ['c@m2'], 'zh');
+  const zh = buildStatus(results, [['m1', 5, true]], ['c@m2', 'm4'], 'zh');
   assert.match(zh.systemMessage ?? zh, /a@m1  1\.0\.0 → 2\.0\.0  \[组织\]  有更新/);
   assert.match(zh, /b@m1  1\.0\.0  \[官方\]  最新/);
   assert.match(zh, /c@m2  \[个人\]  已忽略\(配置\)/);
   assert.match(zh, /d@m3  \[个人\]  无缓存清单/);
+  assert.match(zh, /e@m4  \[组织\]  已忽略\(配置:marketplace\)/);
   assert.match(zh, /注:m1 刷新失败,版本信息已过期 5 天/);
   assert.match(zh, /忽略配置: c@m2/);
-  const en = buildStatus(results, [], [], 'en');
+  const en = buildStatus(results, [], ['c@m2', 'm4'], 'en');
   assert.match(en, /a@m1  1\.0\.0 → 2\.0\.0  \[organization\]  update/);
   assert.match(en, /Plugin status \(read-only, no refresh\):/);
+  assert.match(en, /Ignore config: c@m2, m4/);
 });
 
 test('status.mjs: 只读报告 e2e(stale→有更新+组织 tier;不写盘不刷新)', () => {

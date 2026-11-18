@@ -183,6 +183,10 @@ export function buildStatus(results, stale, ignore, lang = resolveLang()) {
   const tierLabel = { official: zh ? '官方' : 'official', organization: zh ? '组织' : 'organization', personal: zh ? '个人' : 'personal' };
   const lines = results.map((r) => {
     const tier = tierLabel[r.tier] ?? '-';
+    const mname = splitKey(r.key)[1];
+    if (ignore.includes(mname) && r.state !== 'ignored') {
+      return `  • ${r.key}  [${tier}]  ${zh ? '已忽略(配置:marketplace)' : 'ignored (config: marketplace)'}`;
+    }
     if (r.state === 'update') return `  • ${r.key}  ${shortVer(r.installed)} → ${shortVer(r.target)}  [${tier}]  ${zh ? '有更新' : 'update'}`;
     if (r.state === 'current') return `  • ${r.key}  ${shortVer(r.installed)}  [${tier}]  ${zh ? '最新' : 'current'}`;
     if (r.state === 'ignored') return `  • ${r.key}  [${tier}]  ${zh ? '已忽略(配置)' : 'ignored (config)'}`;
