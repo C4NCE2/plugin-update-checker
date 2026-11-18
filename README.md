@@ -5,7 +5,7 @@
 
 [![tests](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml/badge.svg)](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml)
 
-**Hard facts:** 50 tests (TDD) · CI matrix Node 18/20/24 + weekly self-dogfood ·
+**Hard facts:** 54 tests (TDD) · CI matrix Node 18/20/24 + weekly self-dogfood ·
 hook always exits 0 and never writes stderr (session start is never blocked) ·
 silent degradation on network/manifest failures · zero runtime dependencies ·
 zero LLM calls (detection is deterministic code) · [Changelog](CHANGELOG.md).
@@ -94,6 +94,20 @@ Zero-config by default. To silence specific marketplaces or plugins, create
 Entries match a marketplace name (skip it entirely) or a plugin key (skip that
 plugin). A missing or malformed file is ignored silently.
 
+## Inspect status
+
+Any time, without waiting for the next session (read-only, no network, no refresh):
+
+```bash
+node ~/.claude/plugins/cache/plugin-update-checker/update-checker/<version>/scripts/status.mjs
+```
+
+The reminder itself also carries the exact command for your installed copy.
+The report lists every installed plugin: installed → latest, trust tier
+(official = anthropics-owned marketplace, organization = other GitHub org,
+personal = local/other), and state (update / current / ignored / no cached
+manifest / undecidable), plus stale-cache notes and your ignore config.
+
 ## Sources & trust
 
 - Works with any marketplace Claude Code can register whose git remote is
@@ -115,7 +129,7 @@ plugin). A missing or malformed file is ignored silently.
 ## Development
 
 - Design spec: `docs/superpowers/specs/2026-11-13-plugin-update-checker-design.md`
-- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (50 tests)
+- Tests: `node --test plugins/update-checker/tests/check-updates.test.mjs` (54 tests)
 - Debug: set `UPDATE_CHECKER_DEBUG=1`, logs go to
   `~/.claude/plugins/data/update-checker/debug.log`
 - **Release discipline: bump `plugins/update-checker/.claude-plugin/plugin.json`
