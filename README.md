@@ -1,5 +1,8 @@
 # plugin-update-checker
 
+> Session-start update reminders for every installed **Claude Code** plugin —
+> VSCode panel & CLI. Unrelated to the WordPress "Plugin Update Checker" library.
+
 [![tests](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml/badge.svg)](https://github.com/C4NCE2/plugin-update-checker/actions/workflows/test.yml)
 
 **Hard facts:** 50 tests (TDD) · CI matrix Node 18/20/24 + weekly self-dogfood ·
