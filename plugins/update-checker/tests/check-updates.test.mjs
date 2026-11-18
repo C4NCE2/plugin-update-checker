@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,7 @@ import {
   comparePlugin, shortVer, splitKey, buildOutput, resolveLang,
   repoPluginChanged, refreshMarketplace,
   run, isCaughtUp, targetDate, installedVersion, loadIgnore,
+  trustTier, buildStatus,
 } from '../scripts/check-updates.mjs';
 
 const NOW = Date.parse('2026-11-13T12:00:00Z');
@@ -862,4 +863,92 @@ test('run(): 提醒带 marketplace 来源行(github repo)', () => {
     assert.ok(out);
     assert.match(out.systemMessage, /来源: pv-mkt=owner\/pv-repo/);
   });
+});
+
+test('trustTier: anthropics=official;其他 org=organization;directory/缺失=personal', () => {
+  assert.equal(trustTier({ source: 'github', repo: 'anthropics/skills' }), 'official');
+  assert.equal(trustTier({ source: 'github', repo: 'obra/superpowers' }), 'organization');
+  assert.equal(trustTier({ source: 'directory', path: '/x' }), 'personal');
+  assert.equal(trustTier(undefined), 'personal');
+});
+
+test('buildStatus: 逐插件状态/tier/stale/ignore(zh/en)', () => {
+  const results = [
+    { key: 'a@m1', state: 'update', installed: '1.0.0', target: '2.0.0', tier: 'organization' },
+    { key: 'b@m1', state: 'current', installed: '1.0.0', tier: 'official' },
+    { key: 'c@m2', state: 'ignored', tier: 'personal' },
+    { key: 'd@m3', state: 'no-manifest', tier: 'personal' },
+  ];
+  const zh = buildStatus(results, [['m1', 5, true]], ['c@m2'], 'zh');
+  assert.match(zh.systemMessage ?? zh, /a@m1  1\.0\.0 → 2\.0\.0  \[组织\]  有更新/);
+  assert.match(zh, /b@m1  1\.0\.0  \[官方\]  最新/);
+  assert.match(zh, /c@m2  \[个人\]  已忽略\(配置\)/);
+  assert.match(zh, /d@m3  \[个人\]  无缓存清单/);
+  assert.match(zh, /注:m1 刷新失败,版本信息已过期 5 天/);
+  assert.match(zh, /忽略配置: c@m2/);
+  const en = buildStatus(results, [], [], 'en');
+  assert.match(en, /a@m1  1\.0\.0 → 2\.0\.0  \[organization\]  update/);
+  assert.match(en, /Plugin status \(read-only, no refresh\):/);
+});
+
+test('status.mjs: 只读报告 e2e(stale→有更新+组织 tier;不写盘不刷新)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'st-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-st-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'st-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@st-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'st-mkt': { source: { source: 'github', repo: 'owner/st-repo' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  const headBefore = git(mktDir, 'rev-parse', 'HEAD');
+  const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'status.mjs');
+  const r = spawnSync(process.execPath, [entry], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, UPDATE_CHECKER_LANG: 'zh' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '');
+  assert.match(r.stdout, /demo@st-mkt  0\.9\.0 → 1\.0\.0  \[组织\]  有更新/);
+  assert.equal(git(mktDir, 'rev-parse', 'HEAD'), headBefore);
+  assert.equal(existsSync(join(pluginsDir, 'data', 'update-checker', 'state.json')), false);
+});
+
+test('hook-entry: 提醒带状态查询命令(systemMessage 与 additionalContext)', () => {
+  const origin = makeRepo();
+  mkdirSync(join(origin, '.claude-plugin'), { recursive: true });
+  const manifest = { name: 'sc-mkt', plugins: [{ name: 'demo', version: '1.0.0', source: './plugins/demo' }] };
+  writeFileSync(join(origin, '.claude-plugin', 'marketplace.json'), JSON.stringify(manifest));
+  git(origin, 'add', '.');
+  git(origin, 'commit', '-m', 'm1');
+  const cfg = mkdtempSync(join(tmpdir(), 'uc-sc-'));
+  const pluginsDir = join(cfg, 'plugins');
+  mkdirSync(join(pluginsDir, 'marketplaces'), { recursive: true });
+  const mktDir = join(pluginsDir, 'marketplaces', 'sc-mkt');
+  execFileSync('git', ['clone', origin, mktDir], { stdio: 'ignore' });
+  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify({
+    version: 2,
+    plugins: { 'demo@sc-mkt': [{ scope: 'user', version: '0.9.0', gitCommitSha: 'z'.repeat(40) }] },
+  }));
+  writeFileSync(join(pluginsDir, 'known_marketplaces.json'), JSON.stringify({
+    'sc-mkt': { source: { source: 'github', repo: 'owner/sc-repo' }, installLocation: mktDir, lastUpdated: new Date().toISOString() },
+  }));
+  const entry = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'hook-entry.mjs');
+  const r = spawnSync(process.execPath, [entry], {
+    env: { ...process.env, CLAUDE_CONFIG_DIR: cfg, UPDATE_CHECKER_LANG: 'zh' },
+    encoding: 'utf8',
+  });
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.systemMessage, /状态查询: node ".*status\.mjs"/);
+  assert.match(out.hookSpecificOutput.additionalContext, /状态查询: node ".*status\.mjs"/);
 });

@@ -97,10 +97,47 @@ export function resolveLang(env = process.env, ...localeArg) {
   return /^zh\b/i.test(locale || '') ? 'zh' : 'en';
 }
 
+// 信任分层(纯 metadata,学自 DSH dsh-plugin-list-plus):anthropics=官方;其他 github org=组织;本地/其余=个人
+export function trustTier(source) {
+  if (source?.source === 'github' && typeof source.repo === 'string') {
+    return source.repo.split('/')[0] === 'anthropics' ? 'official' : 'organization';
+  }
+  return 'personal';
+}
+
+// 只读加载已缓存 marketplace manifests(不刷新、零网络);requireGit=true 时跳过非 git 目录(与 run 视图一致)
+export function loadManifestsCached(known, requireGit = false) {
+  const manifests = new Map();
+  for (const [name, mkt] of Object.entries(known || {})) {
+    const dir = mkt?.installLocation;
+    if (typeof dir !== 'string' || !dir) continue;
+    if (requireGit && !existsSync(join(dir, '.git'))) continue;
+    const manifest = readJsonSafe(join(dir, '.claude-plugin', 'marketplace.json'));
+    if (!Array.isArray(manifest?.plugins)) continue;
+    manifests.set(name, { dir, byName: new Map(manifest.plugins.filter((p) => p && p.name).map((p) => [p.name, p])) });
+  }
+  return manifests;
+}
+
+// stale 附注三元组 [name, days, failed];仅统计 manifests 中存在的 marketplace(与 run 原行为一致)
+export function staleNotes(known, state, now = Date.now(), manifests) {
+  const stale = [];
+  for (const [name, mkt] of Object.entries(known || {})) {
+    if (manifests && !manifests.has(name)) continue;
+    let lastT = Date.parse(state?.lastRefresh?.[name] ?? '');
+    if (Number.isNaN(lastT)) lastT = Date.parse(mkt?.lastUpdated ?? '');
+    if (!Number.isNaN(lastT) && now - lastT > STALE_NOTE_MS) {
+      stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS)), Boolean(state?.lastFailure?.[name])]);
+    }
+  }
+  return stale;
+}
+
 // updates: [{ plugin, from, to, src? }](from/to 已经过 shortVer;src 为 marketplace 来源,可省略)
 // stale: [[marketplaceName, days, failed]]  缓存过期的附注;failed=true 点名刷新失败
 // lang: 'zh' | 'en'(默认 resolveLang());正文与转达指令整体本地化
-export function buildOutput(updates, stale = [], lang = resolveLang()) {
+// statusCmd: 可选,status.mjs 的完整调用命令;传入则正文末尾附"状态查询"行(systemMessage 与 additionalContext 共享)
+export function buildOutput(updates, stale = [], lang = resolveLang(), statusCmd) {
   if (!Array.isArray(updates) || updates.length === 0) return null;
   const lines = updates.map((u) => {
     const [pname, mname] = splitKey(u.plugin);
@@ -125,6 +162,7 @@ export function buildOutput(updates, stale = [], lang = resolveLang()) {
       ? (failed ? `\n(注:${name} 刷新失败,版本信息已过期 ${days} 天,可能不准)` : `\n(注:${name} 版本信息已过期 ${days} 天,可能不准)`)
       : (failed ? `\n(note: ${name} refresh failed; version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)` : `\n(note: ${name} version info is ${days} day${days === 1 ? '' : 's'} old and may be inaccurate)`);
   }
+  if (statusCmd) body += zh ? `\n状态查询: ${statusCmd}` : `\nStatus: ${statusCmd}`;
   // VSCode 面板不渲染 systemMessage(2.1.325 实证),additionalContext 承担跨环境可见性:
   // 指示模型在首条回复开头原样转达提醒,再照常回应;用户要求更新时逐条执行命令。
   const additionalContext =
@@ -137,6 +175,29 @@ export function buildOutput(updates, stale = [], lang = resolveLang()) {
     systemMessage: body,
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext },
   };
+}
+
+// 只读全景报告:逐插件 installed→latest/tier/状态 + stale 附注 + ignore 说明
+export function buildStatus(results, stale, ignore, lang = resolveLang()) {
+  const zh = lang === 'zh';
+  const tierLabel = { official: zh ? '官方' : 'official', organization: zh ? '组织' : 'organization', personal: zh ? '个人' : 'personal' };
+  const lines = results.map((r) => {
+    const tier = tierLabel[r.tier] ?? '-';
+    if (r.state === 'update') return `  • ${r.key}  ${shortVer(r.installed)} → ${shortVer(r.target)}  [${tier}]  ${zh ? '有更新' : 'update'}`;
+    if (r.state === 'current') return `  • ${r.key}  ${shortVer(r.installed)}  [${tier}]  ${zh ? '最新' : 'current'}`;
+    if (r.state === 'ignored') return `  • ${r.key}  [${tier}]  ${zh ? '已忽略(配置)' : 'ignored (config)'}`;
+    if (r.state === 'no-manifest') return `  • ${r.key}  [${tier}]  ${zh ? '无缓存清单' : 'no cached manifest'}`;
+    if (r.state === 'no-record') return `  • ${r.key}  [${tier}]  ${zh ? '无安装记录' : 'no install record'}`;
+    return `  • ${r.key}  ${shortVer(r.installed)}  [${tier}]  ${zh ? '无法判定' : 'undecidable'}`;
+  });
+  let out = (zh ? '插件状态(只读,未刷新):' : 'Plugin status (read-only, no refresh):') + '\n' +
+    (lines.join('\n') || (zh ? '  (无已装插件)' : '  (no installed plugins)'));
+  for (const [name, days, failed] of stale) {
+    out += zh ? `\n(注:${name} ${failed ? '刷新失败,' : ''}版本信息已过期 ${days} 天)`
+              : `\n(note: ${name} ${failed ? 'refresh failed; ' : ''}version info ${days} day(s) old)`;
+  }
+  if (ignore.length) out += zh ? `\n忽略配置: ${ignore.join(', ')}` : `\nIgnore config: ${ignore.join(', ')}`;
+  return out;
 }
 
 export const PULL_TIMEOUT_MS = 8 * 1000; // 单仓库 git pull 超时
@@ -222,8 +283,63 @@ export function debug(cfg, ...args) {
   } catch { /* 调试路径不冒泡任何错误 */ }
 }
 
+// 纯判定:给定已缓存 manifests,返回 updates 与逐插件 results;不刷新、不写盘
+export function evaluatePlugins(pluginEntries, manifests, known, state, ignore, now = Date.now()) {
+  const updates = [];
+  const results = [];
+  for (const [key, records] of pluginEntries) {
+    const rec0 = Array.isArray(records) ? records[0] : records;
+    const [pname, mname] = splitKey(key);
+    const mkt = manifests.get(mname);
+    const tier = trustTier(known[mname]?.source);
+    if (!rec0) { results.push({ key, state: 'no-record', tier }); continue; }
+    if (ignore.includes(key)) { results.push({ key, state: 'ignored', tier }); continue; }
+    if (!mkt) { results.push({ key, state: 'no-manifest', tier }); continue; }
+    const msrc = known[mname]?.source;
+    const src = msrc?.source === 'github' && typeof msrc.repo === 'string' ? msrc.repo
+      : msrc?.source === 'directory' ? 'local directory' : undefined;
+    const disk = installedVersion(rec0.installPath);
+    const rec = disk ? { ...rec0, version: disk } : rec0;
+    const entry = mkt.byName.get(pname) ?? null;
+    let cmp = comparePlugin(rec, entry);
+    if (cmp.status === 'repo-check') {
+      const subPath = cmp.subPath;
+      const remaining = now + TOTAL_BUDGET_MS - Date.now();
+      const changed = remaining > 500
+        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, subPath, Math.min(PULL_TIMEOUT_MS, remaining))
+        : null;
+      cmp = changed === true
+        ? { status: 'update', from: rec.version, to: '内容有更新' }
+        : changed === false
+          ? { status: 'current' }
+          : { status: 'skip', reason: 'undecidable' };
+      if (cmp.status === 'update') {
+        const rem = now + TOTAL_BUDGET_MS - Date.now();
+        const d = rem > 500 ? targetDate(mkt.dir, ['--', subPath], Math.min(PULL_TIMEOUT_MS, rem)) : null;
+        if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
+      }
+    } else if (cmp.status === 'update' && entry && entry.source && typeof entry.source === 'object'
+               && typeof entry.source.sha === 'string' && entry.source.sha) {
+      const rem = now + TOTAL_BUDGET_MS - Date.now();
+      const d = rem > 500
+        ? targetDate(mkt.dir, [`-S${entry.source.sha}`, '--', '.claude-plugin/marketplace.json'], Math.min(PULL_TIMEOUT_MS, rem))
+        : null;
+      if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
+    }
+    if (cmp.status === 'update') {
+      updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to), src });
+      results.push({ key, state: 'update', installed: rec.version, target: cmp.to, tier, src });
+    } else if (cmp.status === 'current') {
+      results.push({ key, state: 'current', installed: rec.version, tier, src });
+    } else {
+      results.push({ key, state: 'undecidable', installed: rec.version, tier, src });
+    }
+  }
+  return { updates, results };
+}
+
 // 主编排:发现 → 节流刷新 → 比对 → 输出。失败一律静默降级,返回 null 表示无需提醒。
-export function run(now = Date.now(), lang = resolveLang()) {
+export function run(now = Date.now(), lang = resolveLang(), statusCmd) {
   const cfg = configDir();
   const pluginsDir = join(cfg, 'plugins');
   const installed = readJsonSafe(join(pluginsDir, 'installed_plugins.json'));
@@ -240,8 +356,6 @@ export function run(now = Date.now(), lang = resolveLang()) {
   state.lastFailure = asObject(state.lastFailure);
 
   const budgetEnd = Date.now() + TOTAL_BUDGET_MS; // 预算锚定实时钟;注入的 now 仅用于业务判定
-  const manifests = new Map(); // marketplace 名 → { dir, byName: Map(插件名→条目) }
-  const stale = [];            // [marketplace 名, 过期天数, 是否刷新失败]
 
   for (const [name, mkt] of Object.entries(known)) {
     if (ignore.includes(name)) { debug(cfg, 'ignored marketplace', name); continue; }
@@ -261,67 +375,13 @@ export function run(now = Date.now(), lang = resolveLang()) {
         }
       }
     }
-
-    const manifest = readJsonSafe(join(dir, '.claude-plugin', 'marketplace.json'));
-    if (!Array.isArray(manifest?.plugins)) { debug(cfg, 'no manifest', name); continue; }
-    manifests.set(name, {
-      dir,
-      byName: new Map(manifest.plugins.filter((p) => p && p.name).map((p) => [p.name, p])),
-    });
-
-    let lastT = Date.parse(state.lastRefresh[name] ?? '');
-    if (Number.isNaN(lastT)) lastT = Date.parse(mkt?.lastUpdated ?? '');
-    if (!Number.isNaN(lastT) && now - lastT > STALE_NOTE_MS) {
-      stale.push([name, Math.max(1, Math.floor((now - lastT) / DAY_MS)), Boolean(state.lastFailure[name])]);
-    }
   }
 
-  const updates = [];
-  for (const [key, records] of pluginEntries) {
-    const rec0 = Array.isArray(records) ? records[0] : records; // 多 scope 取首条
-    const [pname, mname] = splitKey(key);
-    if (ignore.includes(key)) continue;
-    const mkt = manifests.get(mname);
-    if (!rec0 || !mkt) continue;
-    // 已装版本以安装目录 plugin.json 为准(记录字段可能与实际文件 diverge);读不到回退记录
-    const disk = installedVersion(rec0.installPath);
-    const rec = disk ? { ...rec0, version: disk } : rec0;
-    const entry = mkt.byName.get(pname) ?? null;
-    let cmp = comparePlugin(rec, entry);
-    if (cmp.status === 'repo-check') {
-      // 规则4:本地 git diff 判定插件子目录是否有变更;同样受总预算约束,预算不足视为无法判定
-      const subPath = cmp.subPath;
-      const remaining = budgetEnd - Date.now();
-      const changed = remaining > 500
-        ? repoPluginChanged(mkt.dir, rec.gitCommitSha, subPath, Math.min(PULL_TIMEOUT_MS, remaining))
-        : null;
-      cmp = changed === true
-        ? { status: 'update', from: rec.version, to: '内容有更新' }
-        : changed === false
-          ? { status: 'current' }
-          : { status: 'skip', reason: 'undecidable' };
-      if (cmp.status === 'update') {
-        // 形态 c"已跟上":更新时间晚于子目录最后变更时间(兼容不回写 sha 的 Claude 版本)
-        const rem = budgetEnd - Date.now();
-        const d = rem > 500 ? targetDate(mkt.dir, ['--', subPath], Math.min(PULL_TIMEOUT_MS, rem)) : null;
-        if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
-      }
-    } else if (cmp.status === 'update' && entry && entry.source && typeof entry.source === 'object'
-               && typeof entry.source.sha === 'string' && entry.source.sha) {
-      // 形态 a"已跟上":更新时间晚于 pin sha 写入清单的提交日期(兼容不回写 sha 的 Claude 版本)
-      const rem = budgetEnd - Date.now();
-      const d = rem > 500
-        ? targetDate(mkt.dir, [`-S${entry.source.sha}`, '--', '.claude-plugin/marketplace.json'], Math.min(PULL_TIMEOUT_MS, rem))
-        : null;
-      if (isCaughtUp(rec.lastUpdated, d)) cmp = { status: 'current' };
-    }
-    if (cmp.status === 'update') {
-      const msrc = known[mname]?.source;
-      const src = msrc?.source === 'github' && typeof msrc.repo === 'string' ? msrc.repo
-        : msrc?.source === 'directory' ? 'local directory' : undefined;
-      updates.push({ plugin: key, from: shortVer(cmp.from ?? rec.version), to: shortVer(cmp.to), src });
-    }
-  }
+  const manifests = loadManifestsCached(known, true);
+  // ignore 的 marketplace 整体跳过(与原内联循环一致):不比对、不出 stale 附注
+  for (const name of ignore) manifests.delete(name);
+  const stale = staleNotes(known, state, now, manifests);
+  const { updates } = evaluatePlugins(pluginEntries, manifests, known, state, ignore, now);
 
   try {
     mkdirSync(dirname(statePath), { recursive: true });
@@ -329,5 +389,5 @@ export function run(now = Date.now(), lang = resolveLang()) {
   } catch { debug(cfg, 'state write failed'); }
 
   debug(cfg, 'updates found:', String(updates.length));
-  return buildOutput(updates, stale, lang);
+  return buildOutput(updates, stale, lang, statusCmd);
 }
